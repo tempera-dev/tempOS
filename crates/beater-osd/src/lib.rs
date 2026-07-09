@@ -783,13 +783,27 @@ impl Store {
     pub fn record_memory(
         &self,
         session_id: &str,
-        memory: MemoryRecord,
+        mut memory: MemoryRecord,
         created_at: DateTime<Utc>,
     ) -> DaemonResult<JournalRecord> {
         self.with_session_lock(session_id, || {
             let mut journal = self.load_journal_unlocked(session_id)?;
             let projection = project_journal(session_id, &journal)?;
             ensure_session_running(&projection.session)?;
+            match (
+                projection.session.memory_scope.as_deref(),
+                memory.scope.as_deref(),
+            ) {
+                (Some(session_scope), Some(memory_scope)) if session_scope != memory_scope => {
+                    return Err(DaemonError::Refused(format!(
+                        "memory scope {memory_scope} does not match session memory_scope {session_scope}"
+                    )));
+                }
+                (Some(session_scope), None) => {
+                    memory.scope = Some(session_scope.to_string());
+                }
+                _ => {}
+            }
             let record = journal.append(JournalEvent::MemoryWritten { memory }, created_at)?;
             journal.verify_chain()?;
             self.write_journal_record_unlocked(session_id, &record)?;
