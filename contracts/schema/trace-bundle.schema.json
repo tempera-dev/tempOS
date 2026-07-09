@@ -12,6 +12,11 @@
     "policy_version": { "type": "string" },
     "sessions": { "type": "array", "items": { "$ref": "agent-session.schema.json" }, "minItems": 1 },
     "grants": { "type": "array", "items": { "$ref": "capability-grant.schema.json" } },
+    "capability_revocations": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/capability_revocation" },
+      "default": []
+    },
     "payment_mandates": { "type": "array", "items": { "$ref": "payment-mandate.schema.json" } },
     "approvals": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/approval_evidence" } },
     "simulations": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/simulation_evidence" } },
@@ -56,6 +61,17 @@
     "journal": { "type": "array", "items": { "$ref": "journal.schema.json" } }
   },
   "$defs": {
+    "capability_revocation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["grant_id", "revocation_handle", "revoked_by", "reason"],
+      "properties": {
+        "grant_id": { "type": "string", "minLength": 1 },
+        "revocation_handle": { "type": "string", "minLength": 1 },
+        "revoked_by": { "type": "string", "minLength": 1 },
+        "reason": { "type": "string", "minLength": 1 }
+      }
+    },
     "scenario_evaluation": {
       "type": "object",
       "additionalProperties": false,

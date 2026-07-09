@@ -306,6 +306,7 @@ fn trace_bundle_from_snapshot(snapshot: &JournalSnapshot) -> TraceBundle {
         policy_version: "v1".to_string(),
         sessions: Vec::new(),
         grants: Vec::new(),
+        capability_revocations: Vec::new(),
         payment_mandates: Vec::new(),
         approvals: Vec::new(),
         simulations: Vec::new(),
@@ -325,6 +326,21 @@ fn trace_bundle_from_snapshot(snapshot: &JournalSnapshot) -> TraceBundle {
         match &record.event {
             JournalEvent::SessionCreated { session } => bundle.sessions.push(session.clone()),
             JournalEvent::CapabilityGranted { grant } => bundle.grants.push(grant.clone()),
+            JournalEvent::CapabilityRevoked {
+                grant_id,
+                revocation_handle,
+                revoked_by,
+                reason,
+            } => {
+                bundle
+                    .capability_revocations
+                    .push(beater_os_audit::CapabilityRevocation {
+                        grant_id: grant_id.clone(),
+                        revocation_handle: revocation_handle.clone(),
+                        revoked_by: revoked_by.clone(),
+                        reason: reason.clone(),
+                    });
+            }
             JournalEvent::PaymentMandateIssued { mandate } => {
                 bundle.payment_mandates.push(mandate.clone());
             }
@@ -370,7 +386,7 @@ fn trace_bundle_from_snapshot(snapshot: &JournalSnapshot) -> TraceBundle {
                 bundle.simulations.push(simulation.clone());
             }
             JournalEvent::ReceiptAppended { receipt } => bundle.receipts.push(receipt.clone()),
-            JournalEvent::SessionStatusChanged { .. } | JournalEvent::CapabilityRevoked { .. } => {}
+            JournalEvent::SessionStatusChanged { .. } => {}
         }
     }
     bundle

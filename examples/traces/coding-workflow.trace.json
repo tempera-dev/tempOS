@@ -82,6 +82,7 @@
       "reason": "Run the sandboxed test runner to verify the fix."
     }
   ],
+  "capability_revocations": [],
   "manifests": [
     {
       "action_id": "act-read-parser",

@@ -489,6 +489,13 @@ fn trace_export_emits_schema_shaped_live_bundle() {
         0
     );
     assert_eq!(
+        json["capability_revocations"]
+            .as_array()
+            .expect("capability_revocations array")
+            .len(),
+        0
+    );
+    assert_eq!(
         json["execution_lease_heartbeats"]
             .as_array()
             .expect("execution_lease_heartbeats array")

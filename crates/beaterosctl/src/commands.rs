@@ -1575,6 +1575,25 @@ fn trace_export(store: &Store, args: &ParsedArgs) -> CliResult<String> {
             _ => None,
         })
         .collect();
+    let capability_revocations = export
+        .journal
+        .records
+        .iter()
+        .filter_map(|record| match &record.event {
+            JournalEvent::CapabilityRevoked {
+                grant_id,
+                revocation_handle,
+                revoked_by,
+                reason,
+            } => Some(beater_os_audit::CapabilityRevocation {
+                grant_id: grant_id.clone(),
+                revocation_handle: revocation_handle.clone(),
+                revoked_by: revoked_by.clone(),
+                reason: reason.clone(),
+            }),
+            _ => None,
+        })
+        .collect();
     let execution_leases = export
         .journal
         .records
@@ -1638,6 +1657,7 @@ fn trace_export(store: &Store, args: &ParsedArgs) -> CliResult<String> {
         policy_version,
         sessions: vec![export.projection.session],
         grants: export.projection.grants,
+        capability_revocations,
         payment_mandates: export.projection.mandates,
         approvals: export.projection.approvals,
         simulations: export.projection.simulations,
