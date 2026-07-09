@@ -4,7 +4,10 @@ Machine-readable, end-to-end trace bundles that make `final.md`'s reproducibilit
 and MVP claims concrete (§2.2, §24). Each `*.trace.json` conforms to
 `contracts/schema/trace-bundle.schema.json` and is checked by the conformance
 gate for schema conformance, hash-linked receipt/journal chains, journal
-causality, and independent policy admission of every recorded decision.
+causality, independent policy admission of every recorded decision, and
+top-level model-route decision evidence matching `model_route_decided` journal
+events. These fixtures do not exercise model routing yet, so their
+`model_route_decisions` sections are present and empty.
 
 ## Bundles
 

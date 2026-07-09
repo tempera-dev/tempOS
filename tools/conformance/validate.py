@@ -123,6 +123,16 @@ def check_trace_bundle(rep: Report, reg, path: Path) -> None:
     # Hash chains + causality.
     rep.add_errors(f"trace {name} receipt-chain", journalcheck.verify_receipt_chain(bundle.get("receipts", [])))
     rep.add_errors(f"trace {name} journal-chain", journalcheck.verify_journal_chain(bundle.get("journal", [])))
+    projected_model_route_decisions = [
+        record.get("event", {}).get("decision")
+        for record in bundle.get("journal", [])
+        if record.get("event", {}).get("kind") == "model_route_decided"
+    ]
+    rep.check(
+        bundle.get("model_route_decisions", []) == projected_model_route_decisions,
+        f"trace {name} model-route-decisions",
+        "top-level model_route_decisions must match model_route_decided journal events",
+    )
 
     # Independent admission: each decision must match a re-derived admit().
     decisions = bundle.get("decisions", [])

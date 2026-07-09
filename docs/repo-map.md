@@ -162,7 +162,7 @@ review boundaries.
     receipt-closed, reconciliation-closed, and still-open lease state from the
     journal rather than trusting daemon or worker self-report.
   - `verify-trace` checks exported full trace bundles offline without importing
-    them into daemon state.
+    them into daemon state, including compact model-route decision evidence.
 
 ## 3) Infrastructure and hardening gates
 

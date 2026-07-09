@@ -9,8 +9,8 @@
 
 use beater_os_core::{
     ActionManifest, AgentSession, ApprovalEvidence, CapabilityGrant, CapabilityReceipt,
-    InMemoryJournal, JournalEvent, JournalRecord, JournalSnapshot, PaymentMandate, PolicyDecision,
-    ReceiptLedger, SessionStatus, SimulationEvidence,
+    InMemoryJournal, JournalEvent, JournalRecord, JournalSnapshot, ModelRouteDecisionRecord,
+    PaymentMandate, PolicyDecision, ReceiptLedger, SessionStatus, SimulationEvidence,
 };
 use serde::{Deserialize, Serialize};
 
@@ -33,6 +33,8 @@ pub struct TraceBundle {
     pub simulations: Vec<SimulationEvidence>,
     pub manifests: Vec<ActionManifest>,
     pub decisions: Vec<PolicyDecision>,
+    #[serde(default)]
+    pub model_route_decisions: Vec<ModelRouteDecisionRecord>,
     pub receipts: Vec<CapabilityReceipt>,
     pub journal: Vec<JournalRecord>,
 }
@@ -63,6 +65,7 @@ pub struct TraceBundleVerificationReport {
     pub simulations: usize,
     pub manifests: usize,
     pub decisions: usize,
+    pub model_route_decisions: usize,
     pub receipts: usize,
     pub checks: Vec<CheckResult>,
 }
@@ -76,6 +79,7 @@ struct ProjectedTrace {
     simulations: Vec<SimulationEvidence>,
     manifests: Vec<ActionManifest>,
     decisions: Vec<PolicyDecision>,
+    model_route_decisions: Vec<ModelRouteDecisionRecord>,
     receipts: Vec<CapabilityReceipt>,
 }
 
@@ -194,6 +198,12 @@ pub fn verify_trace_bundle_with_options(
     );
     push_section_check(
         &mut checks,
+        "model_route_decisions",
+        &bundle.model_route_decisions,
+        &projected.model_route_decisions,
+    );
+    push_section_check(
+        &mut checks,
         "receipts",
         &bundle.receipts,
         &projected.receipts,
@@ -228,6 +238,7 @@ pub fn verify_trace_bundle_with_options(
         simulations: projected.simulations.len(),
         manifests: projected.manifests.len(),
         decisions: projected.decisions.len(),
+        model_route_decisions: projected.model_route_decisions.len(),
         receipts: projected.receipts.len(),
         checks,
     }
@@ -292,8 +303,10 @@ fn project_trace_from_journal(records: &[JournalRecord]) -> Result<ProjectedTrac
                 projected.simulations.push(simulation.clone());
             }
             JournalEvent::ReceiptAppended { receipt } => projected.receipts.push(receipt.clone()),
-            JournalEvent::ModelRouteDecided { .. }
-            | JournalEvent::MemoryWritten { .. }
+            JournalEvent::ModelRouteDecided { decision } => {
+                projected.model_route_decisions.push(decision.clone());
+            }
+            JournalEvent::MemoryWritten { .. }
             | JournalEvent::ScenarioEvaluated { .. }
             | JournalEvent::IncidentAnnotated { .. } => {}
         }
@@ -348,10 +361,36 @@ fn check_fail(check: &str, detail: impl Into<String>) -> CheckResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeSet;
 
-    #[test]
-    fn empty_payload_sections_remain_present() {
-        let bundle = TraceBundle {
+    use beater_os_core::{JournalEvent, JournalRecord};
+    use chrono::{TimeZone, Utc};
+
+    fn compact_route_decision() -> ModelRouteDecisionRecord {
+        ModelRouteDecisionRecord {
+            decision_id: "1111111111111111111111111111111111111111111111111111111111111111"
+                .to_string(),
+            session_id: "session-route".to_string(),
+            result: "denied".to_string(),
+            selected_route_id: None,
+            selected_route_hash: None,
+            candidate_route_ids: BTreeSet::new(),
+            rejected_route_ids: BTreeSet::new(),
+            request_hash: "2222222222222222222222222222222222222222222222222222222222222222"
+                .to_string(),
+            catalog_hash: "3333333333333333333333333333333333333333333333333333333333333333"
+                .to_string(),
+            policy_hash: "4444444444444444444444444444444444444444444444444444444444444444"
+                .to_string(),
+            decision_payload_hash:
+                "5555555555555555555555555555555555555555555555555555555555555555".to_string(),
+            requested_at: Utc.with_ymd_and_hms(2026, 7, 9, 0, 0, 0).unwrap(),
+            recorded_at: Utc.with_ymd_and_hms(2026, 7, 9, 0, 0, 1).unwrap(),
+        }
+    }
+
+    fn empty_trace_bundle() -> TraceBundle {
+        TraceBundle {
             bundle_id: "trace-empty".to_string(),
             description: None,
             policy_version: "policy-test".to_string(),
@@ -362,13 +401,70 @@ mod tests {
             simulations: Vec::new(),
             manifests: Vec::new(),
             decisions: Vec::new(),
+            model_route_decisions: Vec::new(),
             receipts: Vec::new(),
             journal: Vec::new(),
-        };
+        }
+    }
+
+    #[test]
+    fn empty_payload_sections_remain_present() {
+        let bundle = empty_trace_bundle();
         let json = trace_bundle_to_json(&bundle).unwrap_or_else(|err| err.to_string());
         assert!(json.contains("\"bundle_id\""));
         assert!(json.contains("\"sessions\""));
+        assert!(json.contains("\"model_route_decisions\""));
         assert!(json.contains("\"journal\""));
         assert!(!json.contains("\"description\""));
+    }
+
+    #[test]
+    fn old_trace_bundles_default_missing_model_route_decisions() {
+        let json = r#"{
+          "bundle_id": "old-trace",
+          "policy_version": "policy-test",
+          "sessions": [],
+          "grants": [],
+          "payment_mandates": [],
+          "approvals": [],
+          "simulations": [],
+          "manifests": [],
+          "decisions": [],
+          "receipts": [],
+          "journal": []
+        }"#;
+        let bundle: TraceBundle = serde_json::from_str(json).expect("old bundle shape");
+        assert!(bundle.model_route_decisions.is_empty());
+    }
+
+    #[test]
+    fn model_route_decisions_project_from_journal() {
+        let decision = compact_route_decision();
+        let record = JournalRecord {
+            seq: 0,
+            created_at: decision.recorded_at,
+            event: JournalEvent::ModelRouteDecided {
+                decision: decision.clone(),
+            },
+            prev_hash: "0000000000000000000000000000000000000000000000000000000000000000"
+                .to_string(),
+            hash: "6666666666666666666666666666666666666666666666666666666666666666".to_string(),
+        };
+        let projected = project_trace_from_journal(&[record]).expect("project trace");
+        assert_eq!(projected.model_route_decisions, vec![decision]);
+    }
+
+    #[test]
+    fn forged_model_route_decision_section_fails_verification() {
+        let mut bundle = empty_trace_bundle();
+        bundle.model_route_decisions.push(compact_route_decision());
+        let report = verify_trace_bundle(&bundle);
+        assert!(
+            report.checks.iter().any(|check| {
+                check.check == "trace_bundle_model_route_decisions"
+                    && check.outcome == CheckOutcome::Fail
+            }),
+            "expected model route decision section mismatch, got {report:?}"
+        );
     }
 }
