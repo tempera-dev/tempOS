@@ -18,6 +18,8 @@ path = "src/lib.rs"
 [dependencies]
 beater-os-audit = { path = "../beater-os-audit" }
 beater-os-core = { path = "../beater-os-core" }
+beater-os-memory = { path = "../beater-os-memory" }
+beater-os-model-router = { path = "../beater-os-model-router" }
 beater-osd = { path = "../beater-osd" }
 beater-os-sandbox = { path = "../beater-os-sandbox" }
 beater-os-tool-gateway = { path = "../beater-os-tool-gateway" }

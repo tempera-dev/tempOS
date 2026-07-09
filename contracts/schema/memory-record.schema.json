@@ -2,22 +2,72 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "memory-record.schema.json",
   "title": "MemoryRecord",
-  "description": "Knowledge with provenance, projected from journal events. final.md §7.7, §12.6, §13.4.",
+  "description": "Knowledge with provenance, projected from journal events. Policy-safe context selection may surface only records that are active in the journal projection, unexpired at selection time, provenance-bound to their source event/digest, allowed by access_policy, filtered by explicit sensitivity allowlists and denied taint/data-class labels, and treated as non-authoritative context rather than grants, approvals, receipts, or trusted instructions. final.md §7.7, §12.6, §13.4.",
   "type": "object",
   "additionalProperties": false,
   "required": ["memory_id", "source_event_id", "source_digest", "writer", "created_at", "kind", "content_ref", "summary", "confidence_basis_points", "sensitivity", "access_policy"],
   "properties": {
     "memory_id": { "type": "string", "minLength": 1 },
-    "source_event_id": { "type": "string", "minLength": 1 },
-    "source_digest": { "type": "string" },
+    "source_event_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Journal event id that anchors this memory's provenance; selectors must verify the source event is in the trusted projection before use."
+    },
+    "source_digest": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Digest of the source evidence/content used to derive the memory; selectors must preserve this binding when projecting context."
+    },
     "writer": { "type": "string" },
     "created_at": { "$ref": "common.schema.json#/$defs/timestamp" },
-    "kind": { "type": "string" },
-    "content_ref": { "type": "string" },
-    "summary": { "type": "string" },
-    "confidence_basis_points": { "type": "integer", "minimum": 0, "maximum": 65535 },
-    "sensitivity": { "$ref": "common.schema.json#/$defs/data_class" },
-    "expires_at": { "$ref": "common.schema.json#/$defs/timestamp" },
-    "access_policy": { "type": "string" }
+    "scope": {
+      "oneOf": [
+        { "type": "string" },
+        { "type": "null" }
+      ],
+      "description": "Optional selector scope. When present, context selection must match the requested scope before surfacing the memory."
+    },
+    "kind": { "type": "string", "minLength": 1 },
+    "content_ref": { "type": "string", "minLength": 1 },
+    "summary": {
+      "type": "string",
+      "description": "Model-visible summary text. It is context only and must not be treated as policy authority, user instruction, approval, receipt, or source evidence."
+    },
+    "confidence_basis_points": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10000,
+      "description": "Ranking/evidence quality signal for selectors; confidence never upgrades provenance or authority."
+    },
+    "sensitivity": {
+      "$ref": "common.schema.json#/$defs/data_class",
+      "description": "Data-class label used by selectors to enforce grant, model-route, taint, and purpose policies before surfacing memory as context."
+    },
+    "source_taint": {
+      "type": "array",
+      "items": { "$ref": "common.schema.json#/$defs/taint_label" },
+      "uniqueItems": true,
+      "default": [],
+      "description": "Taint labels inherited from the source material; selectors may deny any matching label before using this memory as context."
+    },
+    "source_data_classes": {
+      "type": "array",
+      "items": { "$ref": "common.schema.json#/$defs/data_class" },
+      "uniqueItems": true,
+      "default": [],
+      "description": "Data classes inherited from the source material; selectors may deny any matching class independently of the memory sensitivity."
+    },
+    "expires_at": {
+      "oneOf": [
+        { "$ref": "common.schema.json#/$defs/timestamp" },
+        { "type": "null" }
+      ],
+      "description": "If present, the record is selectable only before this time; expired records remain audit data but must not enter model context."
+    },
+    "access_policy": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Policy selector for who/what may read this memory; context selection must satisfy it independently of model preference."
+    }
   }
 }

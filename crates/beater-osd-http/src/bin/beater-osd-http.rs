@@ -23,14 +23,17 @@ use std::process::ExitCode;
 use std::time::Duration as StdDuration;
 
 use beater_os_core::{
-    ActionKind, ActionManifest, AgentSession, Budget, CapabilityGrant, CapabilityReceiptInput,
-    CapabilityScope, CapabilitySelector, DataClass, DecisionResult, DelegationMode,
-    ExecutionLeaseReconciliation, ExecutionLeaseResolution, GrantConstraints, PolicyDecision,
-    ResourceKind, RiskClass, SessionStatus, SideEffectClass, TaintLabel,
+    ActionKind, ActionManifest, AgentSession, ApprovalEvidence, Budget, CapabilityGrant,
+    CapabilityReceiptInput, CapabilityScope, CapabilitySelector, DataClass, DecisionResult,
+    DelegationMode, ExecutionLeaseReconciliation, ExecutionLeaseResolution, GrantConstraints,
+    MemoryRecord, PolicyDecision, ResourceKind, RiskClass, SessionStatus, SideEffectClass,
+    TaintLabel,
 };
+use beater_os_model_router::{ModelRoute, ModelRouteCatalog, ModelRouteRequest};
 use beater_os_runtime::{
     AgentRuntime, RuntimeBundle, RuntimeError, RuntimeLocalShellWorkerLoopRequest,
     RuntimeLocalShellWorkerPlanRequest, RuntimeLocalShellWorkerRequest,
+    RuntimeMemoryContextRequest, RuntimeModelRouteRequest,
     RuntimeSupervisedLocalShellWorkerCycleRequest,
 };
 use beater_os_sandbox::{SandboxLimits, safe_path_environment, validate_environment};
@@ -57,6 +60,7 @@ struct Cli {
     json: bool,
     bind: String,
     token_file: Option<PathBuf>,
+    model_route_catalog: Option<PathBuf>,
     once: bool,
 }
 
@@ -81,7 +85,8 @@ beater-osd-http — loopback HTTP control plane for the beaterOS daemon
 
 USAGE:
     beater-osd-http [runtime-smoke] [--root <path>] [--session-id <id>] [--json]
-    beater-osd-http serve --root <path> --token-file <path> [--bind 127.0.0.1:8787] [--once]
+    beater-osd-http serve --root <path> --token-file <path> [--bind 127.0.0.1:8787]
+        [--model-route-catalog <routes.json>] [--once]
 
 COMMANDS:
     runtime-smoke   Exercise the core daemon contract: session -> grant -> admit -> receipt
@@ -119,7 +124,11 @@ fn run(args: &[String]) -> Result<ExitCode, String> {
             .token_file
             .as_ref()
             .ok_or_else(|| "serve requires --token-file <path>".to_string())?;
-        return run_control_server(root, &cli.bind, token_file, cli.once);
+        let model_route_catalog = match &cli.model_route_catalog {
+            Some(path) => Some(load_model_route_catalog(path)?),
+            None => None,
+        };
+        return run_control_server(root, &cli.bind, token_file, model_route_catalog, cli.once);
     }
     if cli.command != "runtime-smoke" {
         return Err(format!(
@@ -379,6 +388,7 @@ fn run_control_server(
     root: PathBuf,
     bind: &str,
     token_file: &Path,
+    model_route_catalog: Option<Vec<ModelRoute>>,
     once: bool,
 ) -> Result<ExitCode, String> {
     let bind: SocketAddr = bind
@@ -398,7 +408,9 @@ fn run_control_server(
 
     for stream in listener.incoming() {
         let stream = stream.map_err(|err| format!("accept failed: {err}"))?;
-        if let Err(err) = handle_control_stream(stream, &store, &token) {
+        if let Err(err) =
+            handle_control_stream(stream, &store, &token, model_route_catalog.as_deref())
+        {
             eprintln!("beater-osd control request refused: {err}");
         }
         if once {
@@ -422,7 +434,29 @@ fn load_control_token(path: &Path) -> Result<String, String> {
     Ok(token)
 }
 
-fn handle_control_stream(mut stream: TcpStream, store: &Store, token: &str) -> Result<(), String> {
+fn load_model_route_catalog(path: &Path) -> Result<Vec<ModelRoute>, String> {
+    let content = fs::read_to_string(path).map_err(|err| {
+        format!(
+            "could not read --model-route-catalog {}: {err}",
+            path.display()
+        )
+    })?;
+    let routes: Vec<ModelRoute> = serde_json::from_str(&content)
+        .map_err(|err| format!("invalid --model-route-catalog {}: {err}", path.display()))?;
+    if routes.is_empty() {
+        return Err("--model-route-catalog must contain at least one route".to_string());
+    }
+    ModelRouteCatalog::new(routes.clone())
+        .map_err(|err| format!("invalid --model-route-catalog {}: {err}", path.display()))?;
+    Ok(routes)
+}
+
+fn handle_control_stream(
+    mut stream: TcpStream,
+    store: &Store,
+    token: &str,
+    model_route_catalog: Option<&[ModelRoute]>,
+) -> Result<(), String> {
     stream
         .set_read_timeout(Some(StdDuration::from_secs(2)))
         .map_err(|err| err.to_string())?;
@@ -430,7 +464,7 @@ fn handle_control_stream(mut stream: TcpStream, store: &Store, token: &str) -> R
         .set_write_timeout(Some(StdDuration::from_secs(2)))
         .map_err(|err| err.to_string())?;
     let request = read_control_request(&mut stream)?;
-    let response = route_control_request(store, token, &request);
+    let response = route_control_request(store, token, &request, model_route_catalog);
     stream
         .write_all(response.as_bytes())
         .map_err(|err| format!("write response failed: {err}"))?;
@@ -532,9 +566,14 @@ fn parse_content_length(header_bytes: &[u8]) -> Result<usize, String> {
     Ok(content_length.unwrap_or(0))
 }
 
-fn route_control_request(store: &Store, token: &str, request: &ControlRequest) -> String {
+fn route_control_request(
+    store: &Store,
+    token: &str,
+    request: &ControlRequest,
+    model_route_catalog: Option<&[ModelRoute]>,
+) -> String {
     let (status, body) = match authorize_control_request(token, request) {
-        Ok(()) => handle_authorized_control_request(store, request),
+        Ok(()) => handle_authorized_control_request(store, request, model_route_catalog),
         Err(response) => response,
     };
     control_response(status, body)
@@ -573,7 +612,11 @@ fn authorize_control_request(token: &str, request: &ControlRequest) -> Result<()
     Ok(())
 }
 
-fn handle_authorized_control_request(store: &Store, request: &ControlRequest) -> (u16, String) {
+fn handle_authorized_control_request(
+    store: &Store,
+    request: &ControlRequest,
+    model_route_catalog: Option<&[ModelRoute]>,
+) -> (u16, String) {
     let path = path_without_query(&request.path);
     match (request.method.as_str(), path) {
         ("GET", "/healthz") => (200, serde_json::json!({ "status": "ok" }).to_string()),
@@ -583,6 +626,15 @@ fn handle_authorized_control_request(store: &Store, request: &ControlRequest) ->
         },
         ("POST", "/v1/runtime/bundles") => runtime_bundle_route(store, request),
         ("POST", path) if path.starts_with("/v1/sessions/") => {
+            if let Some(session_id) = parse_runtime_memory_context_path(path) {
+                return runtime_memory_context_route(store, session_id, request);
+            }
+            if let Some(session_id) = parse_memory_records_path(path) {
+                return memory_record_route(store, session_id, request);
+            }
+            if let Some(session_id) = parse_runtime_model_route_path(path) {
+                return runtime_model_route_route(store, session_id, request, model_route_catalog);
+            }
             if let Some(session_id) = parse_runtime_worker_preflight_path(path) {
                 return runtime_local_shell_worker_preflight_route(store, session_id, request);
             }
@@ -591,6 +643,9 @@ fn handle_authorized_control_request(store: &Store, request: &ControlRequest) ->
             }
             if let Some((session_id, action_id)) = parse_action_claim_path(path) {
                 return claim_execution_lease_route(store, session_id, action_id, request);
+            }
+            if let Some((session_id, action_id)) = parse_action_approval_path(path) {
+                return approval_route(store, session_id, action_id, request);
             }
             if let Some((session_id, action_id, lease_id)) = parse_action_reconcile_path(path) {
                 return reconcile_execution_lease_route(
@@ -699,6 +754,20 @@ fn parse_action_claim_path(path: &str) -> Option<(&str, &str)> {
     Some((session_id, action_id))
 }
 
+fn parse_action_approval_path(path: &str) -> Option<(&str, &str)> {
+    let rest = path.strip_prefix("/v1/sessions/")?;
+    let (session_id, action_path) = rest.split_once("/actions/")?;
+    let action_id = action_path.strip_suffix("/approval")?;
+    if session_id.is_empty()
+        || action_id.is_empty()
+        || session_id.contains('/')
+        || action_id.contains('/')
+    {
+        return None;
+    }
+    Some((session_id, action_id))
+}
+
 fn parse_action_complete_path(path: &str) -> Option<(&str, &str, &str)> {
     let rest = path.strip_prefix("/v1/sessions/")?;
     let (session_id, action_path) = rest.split_once("/actions/")?;
@@ -768,6 +837,33 @@ fn parse_runtime_worker_loop_path(path: &str) -> Option<&str> {
     Some(session_id)
 }
 
+fn parse_runtime_model_route_path(path: &str) -> Option<&str> {
+    let rest = path.strip_prefix("/v1/sessions/")?;
+    let session_id = rest.strip_suffix("/model-routes/choose")?;
+    if session_id.is_empty() || session_id.contains('/') {
+        return None;
+    }
+    Some(session_id)
+}
+
+fn parse_runtime_memory_context_path(path: &str) -> Option<&str> {
+    let rest = path.strip_prefix("/v1/sessions/")?;
+    let session_id = rest.strip_suffix("/memory/context/select")?;
+    if session_id.is_empty() || session_id.contains('/') {
+        return None;
+    }
+    Some(session_id)
+}
+
+fn parse_memory_records_path(path: &str) -> Option<&str> {
+    let rest = path.strip_prefix("/v1/sessions/")?;
+    let session_id = rest.strip_suffix("/memory/records")?;
+    if session_id.is_empty() || session_id.contains('/') {
+        return None;
+    }
+    Some(session_id)
+}
+
 fn parse_runtime_worker_preflight_path(path: &str) -> Option<&str> {
     let rest = path.strip_prefix("/v1/sessions/")?;
     let session_id = rest.strip_suffix("/actions/execute-local-shell-preflight")?;
@@ -807,6 +903,9 @@ fn runtime_bundle_route(store: &Store, request: &ControlRequest) -> (u16, String
         Err(RuntimeError::Daemon(err)) => (500, json_error("store_error", &err.to_string())),
         Err(RuntimeError::Core(err)) => (500, json_error("core_error", &err.to_string())),
         Err(RuntimeError::Gateway(err)) => (500, json_error("gateway_error", &err.to_string())),
+        Err(RuntimeError::ModelRouter(err)) => {
+            (400, json_error("model_router_error", &err.to_string()))
+        }
     }
 }
 
@@ -820,6 +919,142 @@ fn runtime_error_response(err: RuntimeError) -> (u16, String) {
         RuntimeError::Daemon(err) => daemon_error_response(err),
         RuntimeError::Core(err) => (500, json_error("core_error", &err.to_string())),
         RuntimeError::Gateway(err) => (500, json_error("gateway_error", &err.to_string())),
+        RuntimeError::ModelRouter(err) => (400, json_error("model_router_error", &err.to_string())),
+    }
+}
+
+fn runtime_model_route_route(
+    store: &Store,
+    session_id: &str,
+    request: &ControlRequest,
+    model_route_catalog: Option<&[ModelRoute]>,
+) -> (u16, String) {
+    if !request.headers.contains_key("content-length") {
+        return (
+            400,
+            json_error("missing_content_length", "POST requires Content-Length"),
+        );
+    }
+    let Some(model_route_catalog) = model_route_catalog else {
+        return (
+            503,
+            json_error(
+                "model_route_catalog_unavailable",
+                "serve must be started with --model-route-catalog to choose model routes",
+            ),
+        );
+    };
+    let payload = match serde_json::from_slice::<RuntimeModelRouteHttpRequest>(&request.body) {
+        Ok(payload) => payload,
+        Err(err) => return (400, json_error("bad_json", &err.to_string())),
+    };
+    if payload.session_id != session_id || payload.request.session_id != session_id {
+        return (
+            400,
+            json_error(
+                "bad_request",
+                "model route request session_id must match the route session id and request session_id",
+            ),
+        );
+    }
+    let runtime = AgentRuntime::from_store(store.clone());
+    match runtime.choose_model_route(RuntimeModelRouteRequest {
+        session_id: payload.session_id,
+        routes: model_route_catalog.to_vec(),
+        request: payload.request,
+    }) {
+        Ok(outcome) => serialize_response(200, &outcome),
+        Err(err) => runtime_error_response(err),
+    }
+}
+
+fn runtime_memory_context_route(
+    store: &Store,
+    session_id: &str,
+    request: &ControlRequest,
+) -> (u16, String) {
+    if !request.headers.contains_key("content-length") {
+        return (
+            400,
+            json_error("missing_content_length", "POST requires Content-Length"),
+        );
+    }
+    let payload = match serde_json::from_slice::<RuntimeMemoryContextRequest>(&request.body) {
+        Ok(payload) => payload,
+        Err(err) => return (400, json_error("bad_json", &err.to_string())),
+    };
+    if payload.session_id != session_id {
+        return (
+            400,
+            json_error(
+                "bad_request",
+                "memory context request session_id must match the route session id",
+            ),
+        );
+    }
+    let runtime = AgentRuntime::from_store(store.clone());
+    match runtime.select_memory_context(payload) {
+        Ok(outcome) => serialize_response(200, &outcome),
+        Err(err) => runtime_error_response(err),
+    }
+}
+
+fn memory_record_route(store: &Store, session_id: &str, request: &ControlRequest) -> (u16, String) {
+    if !request.headers.contains_key("content-length") {
+        return (
+            400,
+            json_error("missing_content_length", "POST requires Content-Length"),
+        );
+    }
+    let mut payload = match serde_json::from_slice::<MemoryRecordHttpRequest>(&request.body) {
+        Ok(payload) => payload,
+        Err(err) => return (400, json_error("bad_json", &err.to_string())),
+    };
+    if payload.session_id != session_id {
+        return (
+            400,
+            json_error(
+                "bad_request",
+                "memory record request session_id must match the route session id",
+            ),
+        );
+    }
+    let projection = match store.project(session_id) {
+        Ok(projection) => projection,
+        Err(err) => return daemon_error_response(err),
+    };
+    match (
+        projection.session.memory_scope.as_deref(),
+        payload.memory.scope.as_deref(),
+    ) {
+        (Some(session_scope), Some(memory_scope)) if session_scope != memory_scope => {
+            return (
+                403,
+                json_error(
+                    "refused",
+                    "memory record scope must match the session memory_scope",
+                ),
+            );
+        }
+        (Some(session_scope), None) => {
+            payload.memory.scope = Some(session_scope.to_string());
+        }
+        _ => {}
+    }
+    let memory_id = payload.memory.memory_id.clone();
+    let created_at = payload.memory.created_at;
+    match store.record_memory(session_id, payload.memory, created_at) {
+        Ok(record) => serialize_response(
+            201,
+            &MemoryRecordResponse {
+                session_id: session_id.to_string(),
+                memory_id,
+                memory_seq: record.seq,
+                memory_journal_hash: record.hash.clone(),
+                final_journal_root_hash: record.hash,
+            },
+        ),
+        Err(err) => daemon_error_response(err),
     }
 }
 
@@ -1020,6 +1255,156 @@ fn runtime_local_shell_worker_loop_route(
             Err(err) => runtime_error_response(err),
         }
     }
+}
+
+fn approval_route(
+    store: &Store,
+    session_id: &str,
+    action_id: &str,
+    request: &ControlRequest,
+) -> (u16, String) {
+    if !request.headers.contains_key("content-length") {
+        return (
+            400,
+            json_error("missing_content_length", "POST requires Content-Length"),
+        );
+    }
+    let payload = match serde_json::from_slice::<ApprovalHttpRequest>(&request.body) {
+        Ok(payload) => payload,
+        Err(err) => return (400, json_error("bad_json", &err.to_string())),
+    };
+    let ApprovalHttpRequest {
+        grant_id,
+        reviewer_id,
+        review_id,
+        approved_at,
+        readmit,
+    } = payload;
+    if grant_id.trim().is_empty() {
+        return (400, json_error("bad_request", "grant_id must not be empty"));
+    }
+    if reviewer_id.trim().is_empty() {
+        return (
+            400,
+            json_error("bad_request", "reviewer_id must not be empty"),
+        );
+    }
+    let now = Utc::now();
+    let approved_at = approved_at.unwrap_or(now);
+    if approved_at > now {
+        return (
+            400,
+            json_error("bad_request", "approved_at must not be in the future"),
+        );
+    }
+    let projection = match store.project(session_id) {
+        Ok(projection) => projection,
+        Err(err) => return daemon_error_response(err),
+    };
+    let manifest = match projection.manifest(action_id) {
+        Some(manifest) => manifest.clone(),
+        None => {
+            return (
+                404,
+                json_error("action_not_found", "action has not been proposed"),
+            );
+        }
+    };
+    let latest_decision = match projection.latest_decision(action_id) {
+        Some(decision) => decision,
+        None => {
+            return (
+                403,
+                json_error(
+                    "refused",
+                    "action has no policy decision requiring approval",
+                ),
+            );
+        }
+    };
+    if latest_decision.result != DecisionResult::NeedsApproval {
+        return (
+            403,
+            json_error(
+                "refused",
+                &format!(
+                    "latest decision is {:?}, not NeedsApproval",
+                    latest_decision.result
+                ),
+            ),
+        );
+    }
+    if !manifest.required_grants.contains(&grant_id) {
+        return (
+            403,
+            json_error(
+                "refused",
+                "approval grant_id is not one of the action's required grants",
+            ),
+        );
+    }
+    if !projection
+        .grants
+        .iter()
+        .any(|grant| grant.grant_id == grant_id)
+    {
+        return (
+            403,
+            json_error(
+                "refused",
+                "approval grant_id has not been issued in the session",
+            ),
+        );
+    }
+    let review_id = review_id
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| format!("review-{action_id}-{grant_id}"));
+    let approval = match manifest.digest() {
+        Ok(manifest_hash) => ApprovalEvidence {
+            review_id: review_id.clone(),
+            action_id: action_id.to_string(),
+            manifest_hash,
+            grant_id,
+            reviewer_id,
+            approved_at,
+            policy_version: DAEMON_POLICY_VERSION.to_string(),
+        },
+        Err(err) => return (500, json_error("core_error", &err.to_string())),
+    };
+    let record = match store.record_approval(session_id, approval, now) {
+        Ok(record) => record,
+        Err(err) => return daemon_error_response(err),
+    };
+    let readmission = if readmit {
+        match store.admit_action(session_id, manifest) {
+            Ok(outcome) => Some(ApprovalReadmissionResponse {
+                decision: decision_result_to_string(&outcome.decision.result).to_string(),
+                decision_id: outcome.decision.decision_id,
+                explanation: outcome.decision.explanation,
+                matched_rules: outcome.decision.matched_rules,
+                required_review: outcome.decision.required_review,
+                required_simulation: outcome.decision.required_simulation,
+                decision_seq: outcome.decision_record.seq,
+                decision_hash: outcome.decision_record.hash.clone(),
+                final_journal_root_hash: outcome.decision_record.hash,
+            }),
+            Err(err) => return daemon_error_response(err),
+        }
+    } else {
+        None
+    };
+    serialize_response(
+        201,
+        &ApprovalResponse {
+            session_id: session_id.to_string(),
+            action_id: action_id.to_string(),
+            review_id,
+            approval_seq: record.seq,
+            approval_hash: record.hash.clone(),
+            final_journal_root_hash: record.hash,
+            readmission,
+        },
+    )
 }
 
 fn execute_local_shell_route(
@@ -1707,6 +2092,29 @@ enum ControlExecutionError {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
+struct RuntimeModelRouteHttpRequest {
+    session_id: String,
+    request: ModelRouteRequest,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MemoryRecordHttpRequest {
+    session_id: String,
+    memory: MemoryRecord,
+}
+
+#[derive(Debug, Serialize)]
+struct MemoryRecordResponse {
+    session_id: String,
+    memory_id: String,
+    memory_seq: u64,
+    memory_journal_hash: String,
+    final_journal_root_hash: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ClaimExecutionLeaseHttpRequest {
     expected_manifest_hash: String,
     expected_decision_id: String,
@@ -1742,6 +2150,19 @@ struct ReconcileExecutionLeaseHttpRequest {
     reconciled_by: Option<String>,
     #[serde(default)]
     evidence_refs: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ApprovalHttpRequest {
+    grant_id: String,
+    reviewer_id: String,
+    #[serde(default)]
+    review_id: Option<String>,
+    #[serde(default)]
+    approved_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    readmit: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1930,6 +2351,33 @@ struct ReconcileExecutionLeaseResponse {
 }
 
 #[derive(Debug, Serialize)]
+struct ApprovalReadmissionResponse {
+    decision: String,
+    decision_id: String,
+    explanation: String,
+    matched_rules: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    required_review: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    required_simulation: Option<String>,
+    decision_seq: u64,
+    decision_hash: String,
+    final_journal_root_hash: String,
+}
+
+#[derive(Debug, Serialize)]
+struct ApprovalResponse {
+    session_id: String,
+    action_id: String,
+    review_id: String,
+    approval_seq: u64,
+    approval_hash: String,
+    final_journal_root_hash: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    readmission: Option<ApprovalReadmissionResponse>,
+}
+
+#[derive(Debug, Serialize)]
 struct ExecuteLocalShellResponse {
     action_id: String,
     dispatch: String,
@@ -2073,6 +2521,7 @@ fn parse_cli(args: &[String]) -> Result<Cli, String> {
     let mut json = false;
     let mut bind = DEFAULT_CONTROL_BIND.to_string();
     let mut token_file = None;
+    let mut model_route_catalog = None;
     let mut once = false;
 
     while idx < args.len() {
@@ -2113,6 +2562,13 @@ fn parse_cli(args: &[String]) -> Result<Cli, String> {
                 token_file = Some(PathBuf::from(value));
                 idx += 2;
             }
+            "--model-route-catalog" => {
+                let Some(value) = args.get(idx + 1) else {
+                    return Err("--model-route-catalog requires <path>".to_string());
+                };
+                model_route_catalog = Some(PathBuf::from(value));
+                idx += 2;
+            }
             "--once" => {
                 once = true;
                 idx += 1;
@@ -2133,6 +2589,7 @@ fn parse_cli(args: &[String]) -> Result<Cli, String> {
         json,
         bind,
         token_file,
+        model_route_catalog,
         once,
     })
 }

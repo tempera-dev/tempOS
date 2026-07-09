@@ -216,6 +216,33 @@ impl Default for ModelPolicy {
     }
 }
 
+/// Journaled evidence that the daemon selected or denied a model route using
+/// trusted route metadata and the session-owned [`ModelPolicy`].
+///
+/// This intentionally stores compact, provider-neutral metadata. The full route
+/// catalog remains configuration/client input; prompt data and provider
+/// credentials must never be embedded in this journal event.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelRouteDecisionRecord {
+    pub decision_id: HashValue,
+    pub session_id: String,
+    pub result: String,
+    #[serde(default)]
+    pub selected_route_id: Option<String>,
+    #[serde(default)]
+    pub selected_route_hash: Option<HashValue>,
+    #[serde(default)]
+    pub candidate_route_ids: BTreeSet<String>,
+    #[serde(default)]
+    pub rejected_route_ids: BTreeSet<String>,
+    pub request_hash: HashValue,
+    pub catalog_hash: HashValue,
+    pub policy_hash: HashValue,
+    pub decision_payload_hash: HashValue,
+    pub requested_at: DateTime<Utc>,
+    pub recorded_at: DateTime<Utc>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentIdentity {
     pub agent_id: String,
@@ -667,11 +694,17 @@ pub struct MemoryRecord {
     pub source_digest: String,
     pub writer: String,
     pub created_at: DateTime<Utc>,
+    #[serde(default)]
+    pub scope: Option<String>,
     pub kind: String,
     pub content_ref: String,
     pub summary: String,
     pub confidence_basis_points: u16,
     pub sensitivity: DataClass,
+    #[serde(default)]
+    pub source_taint: BTreeSet<TaintLabel>,
+    #[serde(default)]
+    pub source_data_classes: BTreeSet<DataClass>,
     #[serde(default)]
     pub expires_at: Option<DateTime<Utc>>,
     pub access_policy: String,

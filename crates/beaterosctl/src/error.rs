@@ -24,6 +24,9 @@ pub enum CliError {
     /// The tool gateway refused or failed (fail closed).
     #[error("gateway error: {0}")]
     Gateway(#[from] beater_os_tool_gateway::GatewayError),
+    /// The model route selector refused or failed (fail closed).
+    #[error("model router error: {0}")]
+    ModelRouter(#[from] beater_os_model_router::ModelRouterError),
     /// The trustworthy tool registry refused or failed (fail closed).
     #[error("registry error: {0}")]
     Registry(#[from] beater_os_tool_registry::RegistryError),

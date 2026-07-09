@@ -17,9 +17,9 @@ pub use contracts::{
     ApprovalRequirement, Budget, CapabilityGrant, CapabilityScope, CapabilitySelector, DataClass,
     DecisionResult, DelegationMode, ExecutionLease, ExecutionLeaseHeartbeat,
     ExecutionLeaseReconciliation, ExecutionLeaseResolution, GrantConstraints, HumanReviewRequest,
-    MemoryRecord, ModelPolicy, PaymentIntent, PaymentMandate, PolicyDecision, ResourceKind,
-    RiskClass, ScenarioManifest, SessionStatus, SideEffectClass, SimulationEvidence, TaintLabel,
-    ToolManifest,
+    MemoryRecord, ModelPolicy, ModelRouteDecisionRecord, PaymentIntent, PaymentMandate,
+    PolicyDecision, ResourceKind, RiskClass, ScenarioManifest, SessionStatus, SideEffectClass,
+    SimulationEvidence, TaintLabel, ToolManifest,
 };
 pub use error::{BeaterOsError, BeaterOsResult};
 pub use hash::{HashValue, hash_json};

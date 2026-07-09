@@ -148,6 +148,14 @@ fn summarize_event(event: &JournalEvent) -> String {
             "receipt={} action={} status={} effects={:?}",
             receipt.receipt_id, receipt.action_id, receipt.status, receipt.side_effects
         ),
+        JournalEvent::ModelRouteDecided { decision } => format!(
+            "model_route_decision={} session={} result={} selected={:?} candidates={}",
+            decision.decision_id,
+            decision.session_id,
+            decision.result,
+            decision.selected_route_id,
+            decision.candidate_route_ids.len()
+        ),
         JournalEvent::MemoryWritten { memory } => format!(
             "memory={} kind={} sensitivity={:?} writer={}",
             memory.memory_id, memory.kind, memory.sensitivity, memory.writer

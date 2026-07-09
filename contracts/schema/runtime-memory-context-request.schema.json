@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "runtime-memory-context-request.schema.json",
+  "title": "RuntimeMemoryContextRequest",
+  "description": "HTTP/runtime request for selecting bounded, policy-safe memory context for one daemon session.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["session_id"],
+  "properties": {
+    "session_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Must match the session id in /v1/sessions/<id>/memory/context/select."
+    },
+    "context": {
+      "$ref": "memory-context-request.schema.json",
+      "description": "Selector policy. Omitted uses safe runtime defaults."
+    }
+  }
+}

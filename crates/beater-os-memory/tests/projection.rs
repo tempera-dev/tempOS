@@ -10,10 +10,12 @@
 
 use beater_os_core::{
     BeaterOsError, DataClass, InMemoryJournal, JournalEvent, JournalSnapshot, MemoryRecord,
+    TaintLabel,
 };
 use beater_os_memory::{
-    JournalRecords, MemoryProjection, ProjectedMemory, REDACTION_PLACEHOLDER, RedactionDirective,
-    project, project_with_redactions,
+    JournalRecords, MemoryContextRejectReason, MemoryContextRequest, MemoryContextWarning,
+    MemoryProjection, ProjectedMemory, REDACTION_PLACEHOLDER, RedactionDirective, project,
+    project_with_redactions,
 };
 use chrono::{DateTime, Utc};
 
@@ -39,14 +41,31 @@ fn memory(id: &str, source_event: &str, expires_at: Option<DateTime<Utc>>) -> Me
         source_digest: format!("digest-of-{source_event}"),
         writer: format!("writer-{id}"),
         created_at: ts(1_000),
+        scope: None,
         kind: "note".to_string(),
         content_ref: format!("content://{id}"),
         summary: format!("summary of {id}"),
         confidence_basis_points: 8_000,
         sensitivity: DataClass::Internal,
+        source_taint: Default::default(),
+        source_data_classes: Default::default(),
         expires_at,
         access_policy: "default".to_string(),
     }
+}
+
+fn sensitive_memory(
+    id: &str,
+    source_event: &str,
+    sensitivity: DataClass,
+    confidence_basis_points: u16,
+    writer: &str,
+) -> MemoryRecord {
+    let mut record = memory(id, source_event, None);
+    record.sensitivity = sensitivity;
+    record.confidence_basis_points = confidence_basis_points;
+    record.writer = writer.to_string();
+    record
 }
 
 /// A journal that writes the given memories in order, plus a non-memory event
@@ -359,7 +378,196 @@ fn redaction_directive_for_unknown_id_is_a_no_op() {
 }
 
 #[test]
-fn journal_records_trait_accepts_journal_snapshot_and_vec() {
+fn context_selection_filters_poison_risks_and_keeps_source_provenance() {
+    let mut trusted = sensitive_memory(
+        "trusted",
+        "e-1",
+        DataClass::Internal,
+        9_000,
+        "writer:trusted",
+    );
+    trusted.scope = Some("session:alpha".to_string());
+    trusted.source_data_classes.insert(DataClass::Internal);
+
+    let mut secret = sensitive_memory("secret", "e-2", DataClass::Secret, 9_500, "writer:trusted");
+    secret.scope = Some("session:alpha".to_string());
+    secret.source_data_classes.insert(DataClass::Secret);
+
+    let mut low_confidence = sensitive_memory(
+        "low-confidence",
+        "e-3",
+        DataClass::Internal,
+        1_000,
+        "writer:trusted",
+    );
+    low_confidence.scope = Some("session:alpha".to_string());
+
+    let mut untrusted_writer = sensitive_memory(
+        "untrusted-writer",
+        "e-4",
+        DataClass::Internal,
+        9_000,
+        "writer:web",
+    );
+    untrusted_writer.scope = Some("session:alpha".to_string());
+    untrusted_writer
+        .source_taint
+        .insert(TaintLabel::UntrustedWeb);
+
+    let journal = journal_with(vec![trusted, secret, low_confidence, untrusted_writer]);
+    let projection = project(&journal, ts(5_000));
+    let request = MemoryContextRequest {
+        scope: Some("session:alpha".to_string()),
+        min_confidence_basis_points: 5_000,
+        allowed_sensitivities: [DataClass::Public, DataClass::Internal]
+            .into_iter()
+            .collect(),
+        denied_source_taint: [TaintLabel::UntrustedWeb].into_iter().collect(),
+        denied_source_data_classes: [DataClass::Secret].into_iter().collect(),
+        trusted_writers: ["writer:trusted".to_string()].into_iter().collect(),
+        ..MemoryContextRequest::default()
+    };
+
+    let selection = projection.select_context(&request);
+    assert_eq!(selection.selected.len(), 1);
+    assert_eq!(selection.selected[0].memory_id, "trusted");
+    assert_eq!(
+        selection.selected[0].scope.as_deref(),
+        Some("session:alpha")
+    );
+    assert_eq!(
+        selection.selected[0].provenance.source_event_id, "e-1",
+        "selected context must carry memory source id"
+    );
+    assert!(
+        selection.selected[0]
+            .provenance
+            .source_journal_seq
+            .is_some(),
+        "selected context must anchor the source journal record"
+    );
+    assert!(selection.selected[0].content_ref.is_none());
+    assert!(
+        selection.selected[0]
+            .warnings
+            .contains(&MemoryContextWarning::MemoryIsContextNotAuthority)
+    );
+    assert!(
+        selection.selected[0]
+            .warnings
+            .contains(&MemoryContextWarning::ContentRefOmitted)
+    );
+
+    let rejected = selection
+        .rejected
+        .iter()
+        .map(|rejection| {
+            (
+                rejection.memory_id.as_str(),
+                rejection.reasons.as_slice(),
+                rejection.provenance.source_event_id.as_str(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert!(rejected.iter().any(|(id, reasons, source)| {
+        *id == "secret"
+            && *source == "e-2"
+            && reasons.contains(&MemoryContextRejectReason::SensitivityNotAllowed)
+            && reasons.contains(&MemoryContextRejectReason::SourceDataClassDenied)
+    }));
+    assert!(rejected.iter().any(|(id, reasons, source)| {
+        *id == "low-confidence"
+            && *source == "e-3"
+            && reasons.contains(&MemoryContextRejectReason::ConfidenceTooLow)
+    }));
+    assert!(rejected.iter().any(|(id, reasons, source)| {
+        *id == "untrusted-writer"
+            && *source == "e-4"
+            && reasons.contains(&MemoryContextRejectReason::SourceTaintDenied)
+            && reasons.contains(&MemoryContextRejectReason::WriterNotTrusted)
+    }));
+}
+
+#[test]
+fn context_selection_is_bounded_and_orders_by_confidence_then_recency() {
+    let mut older = sensitive_memory("older", "e-1", DataClass::Internal, 9_000, "writer:trusted");
+    older.created_at = ts(900);
+    let mut newer = sensitive_memory("newer", "e-2", DataClass::Internal, 9_000, "writer:trusted");
+    newer.created_at = ts(1_100);
+    let highest = sensitive_memory(
+        "highest-confidence",
+        "e-3",
+        DataClass::Internal,
+        9_500,
+        "writer:trusted",
+    );
+    let journal = journal_with(vec![older, newer, highest]);
+    let projection = project(&journal, ts(5_000));
+    let request = MemoryContextRequest {
+        max_items: Some(2),
+        allowed_sensitivities: [DataClass::Internal].into_iter().collect(),
+        trusted_writers: ["writer:trusted".to_string()].into_iter().collect(),
+        ..MemoryContextRequest::default()
+    };
+
+    let selection = projection.select_context(&request);
+    let selected_ids = selection
+        .selected
+        .iter()
+        .map(|item| item.memory_id.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(selected_ids, vec!["highest-confidence", "newer"]);
+    assert_eq!(selection.truncated, 1);
+}
+
+#[test]
+fn context_selection_rejects_memory_without_source_record_anchor() {
+    let journal = journal_with(vec![memory("m-a", "e-1", None)]);
+    let memory_only_records = journal
+        .records()
+        .iter()
+        .filter(|record| matches!(record.event, JournalEvent::MemoryWritten { .. }))
+        .cloned()
+        .collect::<Vec<_>>();
+    let projection = project(&memory_only_records, ts(5_000));
+
+    let selection = projection.select_context(&MemoryContextRequest::default());
+    assert!(selection.selected.is_empty());
+    assert_eq!(selection.rejected.len(), 1);
+    assert!(
+        selection.rejected[0]
+            .reasons
+            .contains(&MemoryContextRejectReason::SourceRecordMissing)
+    );
+}
+
+#[test]
+fn context_selection_bounds_rejections_and_preserves_safe_json_defaults() {
+    let mut first = sensitive_memory("first", "e-1", DataClass::Secret, 9_000, "writer:trusted");
+    first.source_data_classes.insert(DataClass::Secret);
+    let mut second = sensitive_memory("second", "e-2", DataClass::Secret, 9_000, "writer:trusted");
+    second.source_data_classes.insert(DataClass::Secret);
+    let journal = journal_with(vec![first, second]);
+    let projection = project(&journal, ts(5_000));
+
+    let request: MemoryContextRequest = match serde_json::from_value(serde_json::json!({
+        "max_rejections": 1
+    })) {
+        Ok(request) => request,
+        Err(err) => panic!("memory context request should deserialize: {err}"),
+    };
+    assert!(
+        request.allowed_sensitivities.contains(&DataClass::Internal),
+        "partial JSON must keep the safe public/internal sensitivity default"
+    );
+    let selection = projection.select_context(&request);
+    assert!(selection.selected.is_empty());
+    assert_eq!(selection.rejected.len(), 1);
+    assert_eq!(selection.truncated_rejections, 1);
+}
+
+#[test]
+fn journal_records_trait_accepts_journal_snapshot_and_vec_after_context_selection() {
     let journal = journal_with(vec![memory("m-a", "e-1", None)]);
     let snapshot = journal.snapshot();
     let records: Vec<_> = journal.records().to_vec();
@@ -376,7 +584,7 @@ fn journal_records_trait_accepts_journal_snapshot_and_vec() {
 }
 
 #[test]
-fn count_by_sensitivity_separates_data_classes() {
+fn count_by_sensitivity_separates_data_classes_after_context_selection() {
     let mut secret = memory("s", "e-1", None);
     secret.sensitivity = DataClass::Secret;
     let journal = journal_with(vec![secret, memory("i", "e-2", None)]);

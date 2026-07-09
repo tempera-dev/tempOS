@@ -6,8 +6,8 @@ other coding agents working in this repository.
 ## What tempOS Is
 
 tempOS is an agent-first operating-system research and implementation repo.
-Current repo/path: `jadenfix/tempOS` and local path `beaterOS`; migrate package/binary
-naming explicitly when the Tempera rename work starts.
+Current canonical repo: `tempera-dev/tempOS`; local package/binary names still
+use `beaterOS` until the Tempera rename work migrates them explicitly.
 The source-of-truth product plan is [final.md](final.md). Implementation must
 turn that plan into reviewed, measurable, macOS-compatible slices without
 shortening or weakening the plan.
@@ -52,6 +52,17 @@ boundary.
 - `crates/beater-os-tool-gateway` is the runtime mediation layer that resolves
   registered tools, derives manifests, asks `beater-osd` for admission, executes
   admitted local shell tools through the sandbox, and records receipts.
+- `crates/beater-os-mcp` is the MCP stdio adoption adapter. It exposes one
+  model-facing `tempos.local_shell` tool and translates calls into existing
+  daemon admission, tool gateway, sandbox, execution-lease, and receipt
+  paths. It does not create grants or pass daemon/MCP/provider/shell credentials
+  through to tools.
+- `crates/beater-os-model-router` is the metadata-only model route selector.
+  It applies `ModelPolicy` route allowlists, local-only mode, data-class
+  ceilings, retention, purpose, context/output, latency, cost, tools, and
+  multimodal requirements before any future provider adapter sees prompt data.
+  It is not a provider SDK and must not read credentials, open sockets, or make
+  model output authoritative.
 - `docs/implementation-backlog.md` maps `final.md` into PR-sized slices and
   review rules.
 - `docs/sota-systems-engineering.md` is the performance, language, security, and
@@ -144,6 +155,7 @@ cargo test --workspace --locked
 cargo clippy --workspace --all-targets --locked -- -D warnings
 git diff --check
 python3 scripts/check-optimization-docs.py
+python3 scripts/run-beater-os-mcp-stdio-gateway-smoke.py --json
 TMPDIR=/private/tmp python3 scripts/local-e2e.py
 ```
 
@@ -196,7 +208,7 @@ Delete each item only after it is fully migrated and verified in this repo.
 - [ ] Migrate user-facing product naming from beaterOS to tempOS across docs,
   packages, binaries, fixtures, and generated clients. Keep the local checkout
   path stable until an explicit filesystem rename is requested.
-- [ ] Update local git remotes from `jadenfix/beaterOS` to `jadenfix/tempOS`
+- [x] Update local git remotes from `jadenfix/tempOS` to `tempera-dev/tempOS`
   where checkouts still use the old remote.
 - [ ] Verification before deleting this queue: `cargo fmt --all -- --check`,
   `cargo clippy --workspace --all-targets --locked -- -D warnings`,

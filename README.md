@@ -14,8 +14,8 @@ The project has three explicit lanes:
 
 - **Compatibility lane:** a local-first Rust agent kernel for explicit
   authority, deterministic policy, sandboxed execution, receipts, memory
-  provenance, eval gates, and auditable side effects on existing operating
-  systems.
+  provenance, policy-safe context selection, eval gates, and auditable side
+  effects on existing operating systems.
 - **Linux add-on lane:** optional Linux-native scheduler, IO, sandbox,
   observability, microVM, and accelerator experiments using mechanisms such as
   `sched_ext`, cgroups, namespaces, seccomp, eBPF/XDP, `io_uring`, DPDK, SPDK,
@@ -49,6 +49,9 @@ that a real metal-touching agent OS would need.
 | Systems skill | [beateros-systems-engineering SKILL](.codex/skills/beateros-systems-engineering/SKILL.md) | Runtime and systems engineering doctrine |
 | Implementation sequence | [docs/implementation-backlog.md](docs/implementation-backlog.md) | PR-sized slices and no-self-merge review rules |
 | Runtime-to-metal architecture | [docs/architecture-runtime-to-metal-path.md](docs/architecture-runtime-to-metal-path.md) | Runtime-first migration map, layer boundaries, and migration-gate expectations |
+| MCP stdio gateway | [docs/mcp-stdio-gateway.md](docs/mcp-stdio-gateway.md) | Operator contract for the first MCP adoption gateway over the local-shell lane |
+| Model router | [docs/model-router.md](docs/model-router.md) | Metadata-only model route contract before prompt data crosses provider boundaries |
+| Memory context | [docs/memory-context.md](docs/memory-context.md) | Policy-safe, bounded, non-authoritative memory context selection surface |
 | Metal OS blueprint | [docs/engineering/metal-os-blueprint.md](docs/engineering/metal-os-blueprint.md) | First-principles 2026 OS shape, Linux add-on split, accelerator fabric, and optimization evidence |
 | Systems engineering | [docs/sota-systems-engineering.md](docs/sota-systems-engineering.md) | Hot-path, Rust/C/assembly, security, and macOS doctrine |
 | Optimization infrastructure | [docs/optimization-agent-playbook.md](docs/optimization-agent-playbook.md) | Bottleneck taxonomy, benchmarks, language baselines, and accelerator review gates |
@@ -57,6 +60,7 @@ that a real metal-touching agent OS would need.
 | Wire contracts | [spec/README.md](spec/README.md) | Language-neutral JSON Schema and conformance suite |
 | Rust core | [crates/beater-os-core](crates/beater-os-core) | Agent sessions, grants, manifests, decisions, receipts, journals |
 | Tool gateway | [crates/beater-os-tool-gateway](crates/beater-os-tool-gateway) | Registered-tool resolution, daemon admission, sandbox execution, and receipts |
+| Model router | [crates/beater-os-model-router](crates/beater-os-model-router) | Policy-bound model-route selection for data-class, retention, budget, and provider constraints |
 | Source audit | [docs/source-matrix.md](docs/source-matrix.md) | Citation verification and source-maintenance rules |
 
 Important `final.md` sections:
@@ -155,7 +159,7 @@ beaterOS is licensed under the [Apache License 2.0](LICENSE).
 
 ## Ecosystem
 
-beaterOS is part of the [ecosystem](https://github.com/jadenfix/ecosystem) — a family of Rust-first, local-first agent-infrastructure projects. It is fully standalone: the kernel contracts, policy engine, and conformance suite are usable by any agent runtime. Within the family it is the governance spine, with designed-for connections (each lands only with a real consumer) for:
+beaterOS is part of the Tempera ecosystem at [`tempera-dev/tempOS`](https://github.com/tempera-dev/tempOS) — a family of Rust-first, local-first agent-infrastructure projects. It is fully standalone: the kernel contracts, policy engine, and conformance suite are usable by any agent runtime. Within the family it is the governance spine, with designed-for connections (each lands only with a real consumer) for:
 
 - policy and authority over agents running in [beater.js](https://github.com/jadenfix/beater.js) and browsing via [tempo](https://github.com/jadenfix/tempo)
 - sandboxed side effects through [beatbox](https://github.com/jadenfix/beatbox) and memory provenance through [beater-memory](https://github.com/jadenfix/beater-memory)

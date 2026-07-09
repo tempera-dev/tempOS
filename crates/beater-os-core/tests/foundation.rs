@@ -1823,11 +1823,14 @@ fn memory_record(
         source_digest: format!("sha256:{source_event_id}"),
         writer: "agent:beater-os".to_string(),
         created_at: now,
+        scope: None,
         kind: "summary".to_string(),
         content_ref: format!("memory://{memory_id}"),
         summary: "derived from a journaled source".to_string(),
         confidence_basis_points: 9_000,
         sensitivity: DataClass::Internal,
+        source_taint: Default::default(),
+        source_data_classes: Default::default(),
         expires_at: None,
         access_policy: "session".to_string(),
     }
@@ -2131,6 +2134,30 @@ fn journal_rejects_memory_with_unknown_source_event() -> Result<(), Box<dyn std:
         panic!("expected journal causality error");
     };
     assert!(reason.contains("unknown source event"));
+    Ok(())
+}
+
+#[test]
+fn journal_rejects_memory_confidence_above_basis_point_ceiling()
+-> Result<(), Box<dyn std::error::Error>> {
+    let now = fixed_time();
+    let mut journal = InMemoryJournal::new();
+    journal.append(
+        JournalEvent::IncidentAnnotated {
+            incident_id: "source-1".to_string(),
+            note: "source event".to_string(),
+        },
+        now,
+    )?;
+    let mut memory = memory_record("mem-1", "source-1", now);
+    memory.confidence_basis_points = 10_001;
+    let err = journal
+        .append(JournalEvent::MemoryWritten { memory }, now)
+        .err();
+    let Some(BeaterOsError::JournalCausality { reason, .. }) = err else {
+        panic!("expected journal causality error");
+    };
+    assert!(reason.contains("confidence_basis_points exceeds 10000"));
     Ok(())
 }
 

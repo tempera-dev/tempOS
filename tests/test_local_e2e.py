@@ -68,6 +68,14 @@ class PlanTest(unittest.TestCase):
                     ),
                 ),
                 (
+                    "beater-os-runtime-supervisor-service-smoke",
+                    (
+                        "python3",
+                        "scripts/run-beater-os-runtime-supervisor-service-smoke.py",
+                        "--json",
+                    ),
+                ),
+                (
                     "beater-osd-http-execute-smoke",
                     ("python3", "scripts/run-beater-osd-http-execute-smoke.py", "--json"),
                 ),
@@ -90,6 +98,30 @@ class PlanTest(unittest.TestCase):
                 (
                     "beater-osd-http-claims-smoke",
                     ("python3", "scripts/run-beater-osd-http-claims-smoke.py", "--json"),
+                ),
+                (
+                    "beater-os-mcp-stdio-gateway-smoke",
+                    ("python3", "scripts/run-beater-os-mcp-stdio-gateway-smoke.py", "--json"),
+                ),
+                (
+                    "beater-os-model-router-smoke",
+                    ("python3", "scripts/run-beater-os-model-router-smoke.py", "--json"),
+                ),
+                (
+                    "beater-osd-http-model-router-smoke",
+                    (
+                        "python3",
+                        "scripts/run-beater-osd-http-model-router-smoke.py",
+                        "--json",
+                    ),
+                ),
+                (
+                    "beater-osd-http-memory-context-smoke",
+                    (
+                        "python3",
+                        "scripts/run-beater-osd-http-memory-context-smoke.py",
+                        "--json",
+                    ),
                 ),
                 (
                     "bare-metal-readiness",

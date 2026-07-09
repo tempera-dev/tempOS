@@ -129,6 +129,14 @@
         },
         {
           "additionalProperties": false,
+          "required": ["kind", "decision"],
+          "properties": {
+            "kind": { "const": "model_route_decided" },
+            "decision": { "$ref": "#/$defs/model_route_decision_record" }
+          }
+        },
+        {
+          "additionalProperties": false,
           "required": ["kind", "memory"],
           "properties": {
             "kind": { "const": "memory_written" },
@@ -151,6 +159,83 @@
             "kind": { "const": "incident_annotated" },
             "incident_id": { "type": "string" },
             "note": { "type": "string" }
+          }
+        }
+      ]
+    },
+    "model_route_decision_record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "decision_id",
+        "session_id",
+        "result",
+        "request_hash",
+        "catalog_hash",
+        "policy_hash",
+        "decision_payload_hash",
+        "requested_at",
+        "recorded_at"
+      ],
+      "properties": {
+        "decision_id": { "$ref": "common.schema.json#/$defs/hash_value" },
+        "session_id": { "type": "string", "minLength": 1 },
+        "result": { "type": "string", "enum": ["allowed", "denied"] },
+        "selected_route_id": {
+          "oneOf": [{ "type": "string", "minLength": 1 }, { "type": "null" }],
+          "default": null
+        },
+        "selected_route_hash": {
+          "oneOf": [
+            { "$ref": "common.schema.json#/$defs/hash_value" },
+            { "type": "null" }
+          ],
+          "default": null
+        },
+        "candidate_route_ids": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true,
+          "default": []
+        },
+        "rejected_route_ids": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true,
+          "default": []
+        },
+        "request_hash": { "$ref": "common.schema.json#/$defs/hash_value" },
+        "catalog_hash": { "$ref": "common.schema.json#/$defs/hash_value" },
+        "policy_hash": { "$ref": "common.schema.json#/$defs/hash_value" },
+        "decision_payload_hash": { "$ref": "common.schema.json#/$defs/hash_value" },
+        "requested_at": { "$ref": "common.schema.json#/$defs/timestamp" },
+        "recorded_at": { "$ref": "common.schema.json#/$defs/timestamp" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "result": { "const": "allowed" } },
+            "required": ["result"]
+          },
+          "then": {
+            "properties": {
+              "selected_route_id": { "type": "string", "minLength": 1 },
+              "selected_route_hash": {
+                "$ref": "common.schema.json#/$defs/hash_value"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "result": { "const": "denied" } },
+            "required": ["result"]
+          },
+          "then": {
+            "properties": {
+              "selected_route_id": { "type": "null" },
+              "selected_route_hash": { "type": "null" }
+            }
           }
         }
       ]

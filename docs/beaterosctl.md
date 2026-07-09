@@ -12,10 +12,11 @@ It implements these slices of `final.md`:
   and 9 (trace viewer).
 
 The CLI adds **no authority of its own**. Capability grants, action admission,
-and receipt appends go through `beater-osd::Store`, which owns the single-writer
-runtime boundary and delegates deterministic admission to
-`beater-os-core::PolicyEngine`, outside of any model output. It cannot broaden a
-grant, and it fails closed on missing or invalid input.
+approval evidence, simulations, and receipt appends go through
+`beater-osd::Store`, which owns the single-writer runtime boundary and delegates
+deterministic admission to `beater-os-core::PolicyEngine`, outside of any model
+output. It cannot broaden a grant, and it fails closed on missing or invalid
+input.
 
 ## Loopback HTTP control plane
 
@@ -79,6 +80,19 @@ returns one `action`: `wait_live_lease`, `recover_expired_lease`,
 a plan; the runner must still call the worker-loop route to claim a daemon lease
 before any side effect.
 
+Approval evidence can be recorded through the same loopback token boundary:
+
+```text
+POST /v1/sessions/<session-id>/actions/<action-id>/approval
+```
+
+The body must include `grant_id` and `reviewer_id`, and may include
+`review_id`, `approved_at`, and `readmit`. The daemon accepts the request only
+when the action exists, its latest decision is `NeedsApproval`, the grant is
+both required by the action and issued in the session, and the approval time is
+not in the future. The response returns the approval journal seq/hash and, when
+`readmit` is true, the follow-up admission decision for the same manifest.
+
 Callers may explicitly opt into supervised recovery before the loop runs:
 
 ```json
@@ -137,6 +151,34 @@ admit new work. Renewal is capped by the original action wall-clock budget plus
 daemon grace; claims may opt into a shorter `initial_lease_ms` so long-running
 workers prove liveness periodically without gaining unbounded execution time.
 
+## MCP stdio gateway
+
+`beater-os-mcp-stdio serve-local-shell --root <home>` exposes the local runtime
+to MCP-speaking clients over stdio without adding a second authority path. The
+server advertises exactly one tool, `tempos.local_shell`, with a
+self-contained JSON input schema. Each call must name an existing `session_id`,
+a PATH-resolved `command`, `cwd`, and one or more existing grant ids. The
+gateway creates no sessions, issues no grants, and forwards no daemon token,
+MCP token, provider credential, inherited environment secret, or shell secret to
+the child process.
+
+The gateway bounds MCP stdio header lines, aggregate headers, full frames with
+`--max-request-bytes`, and the text fallback returned to the model with
+`--max-model-output-bytes`. Per-call `timeout_secs`, `max_output_bytes`, and
+`max_model_output_bytes` may tighten those limits but cannot widen the server or
+sandbox caps. The structured result is the authoritative payload: action id,
+policy decision, manifest hash, lease id, tool id, exit status, stdout digest,
+stdout/stderr truncation flags, capped filesystem diff paths plus full counts,
+receipt id/hash, receipt journal hash, final journal root hash, and projection
+counts. The text content is only a compact summary, not a second serialized
+copy of stdout, stderr, or the receipt.
+
+Internally the MCP adapter canonicalizes `cwd`, derives the action target
+itself, registers the exact local-shell digest in the daemon-owned registry,
+then executes through the same `beater-os-tool-gateway` local-shell path used
+by the other runtime surfaces: daemon admission, durable execution lease,
+sandbox execution, and exact receipt completion.
+
 ## Store layout
 
 The store root is chosen by, in order of precedence: the `--home` flag, the
@@ -170,6 +212,8 @@ receipt ledger.
 | `action execute` | Run a scoped shell action through the **tool gateway lane**: resolve a registered local shell tool, canonicalize + confine `--cwd`, admit, and (only if `Allowed`) execute confined and journal a filesystem-diff `CapabilityReceipt`. |
 | `execution-lease reconcile` | Reconcile an expired unresolved execution lease as `outcome_unknown`, closing the runtime recovery blocker without creating a receipt or proving success/no-side-effect. |
 | `simulation record` | Record passed, action-bound simulation evidence for the latest `NeedsSimulation` decision. |
+| `memory record` | Record one non-authoritative, journal-anchored `MemoryWritten` fact through `Store::record_memory`. |
+| `memory context` | Select bounded, source-anchored memory context as JSON through `Store::select_memory_context`. |
 | `receipt record` | Record a `CapabilityReceipt` for an **admitted** action (fails closed otherwise). |
 | `journal verify` | Verify the journal and receipt hash chains and causality. |
 | `trace show` | Render the full trace: session, grants, actions, decisions, receipts. |
@@ -182,6 +226,11 @@ list.
 
 `grant issue` generates a revocation handle by default and prints it with the
 grant. Operators can provide a stable handle with `--revocation-handle <h>`.
+Approval policy is explicit on the grant: `--approval-mode human` or
+`--approval-mode multi_party` requires one or more repeatable `--reviewer <id>`
+values and defaults `--approval-threshold-risk` to `high` when omitted.
+`--approval-mode none` is the default and rejects stray reviewer or threshold
+flags so an operator cannot accidentally create ambiguous review policy.
 For `file_path` grants, `--resource-id` may be omitted when at least one
 `--path-prefix` is present; the CLI stores the selector as `*` so the canonical
 path-prefix constraint, not an exact directory selector, carries the authority.
@@ -192,6 +241,104 @@ must continue to name `--resource-id` explicitly. `grant revoke --grant-id <id>
 propose` and `action execute` evaluate against the durable journal-projected
 revocation registry. They still accept repeatable `--revoked-handle <h>` flags
 as an external monotonic epoch overlay for replay or operator-supplied evidence.
+
+## Memory operator flow
+
+Memory is recorded and selected as context evidence, not authority. The CLI
+never treats a remembered summary as a grant, approval, receipt, or trusted
+instruction.
+
+`memory record` writes through `Store::record_memory`, which appends
+`MemoryWritten` only after the daemon verifies that `--source-event` names a
+prior event in the same session journal. If the session has `memory_scope`, the
+CLI defaults the memory record to that scope and rejects attempts to record a
+different scope.
+
+```console
+$ beaterosctl session create --session mem-demo --agent agent:runtime \
+    --workspace ws-memory --goal "remember safe context" \
+    --memory-scope session:mem-demo
+created session mem-demo
+
+$ beaterosctl memory record --session mem-demo --memory-id mem-1 \
+    --source-event mem-demo --source-digest sha256:mem-demo \
+    --kind summary --content-ref memory://mem-1 \
+    --summary "Repository uses a bounded memory selector." \
+    --confidence-basis-points 9000 --sensitivity internal \
+    --source-data-class internal --access-policy session
+recorded memory mem-1
+```
+
+`memory context` returns pretty JSON with selected items, structured rejection
+reasons, selection policy, journal record count, and journal root hash. The
+default selector is intentionally narrow: public/internal sensitivity,
+source-record anchoring required, redacted records excluded, content refs
+omitted, and bounded selected/rejected output.
+
+```console
+$ beaterosctl memory context --session mem-demo \
+    --max-items 8 --max-rejections 16 \
+    --allow-sensitivity public,internal \
+    --deny-source-taint untrusted_web \
+    --deny-source-data-class secret \
+    --trusted-writer agent:runtime
+{
+  "session_id": "mem-demo",
+  "projected_memories": 1,
+  "context": {
+    "selected": [
+      {
+        "memory_id": "mem-1",
+        "summary": "Repository uses a bounded memory selector."
+      }
+    ]
+  }
+}
+```
+
+Operator controls:
+
+- `--allow-sensitivity <d,..>` is an explicit allowlist. If omitted, the
+  selector keeps the safe public/internal default.
+- `--deny-source-taint <t,..>` and `--deny-source-data-class <d,..>` reject
+  inherited source labels independently of the memory's own sensitivity.
+- `--trusted-writer <id>` may repeat; omitted writer filters are allowed but the
+  selected items carry a warning.
+- `--include-content-refs` exposes `content_ref`; by default only summaries and
+  provenance are returned.
+- `--allow-unverified-source` disables the default source-record anchor check
+  and should be reserved for audit/debugging, not model context.
+
+## Approval evidence and re-admission
+
+Human approval is recorded as daemon-owned admission evidence, not as a receipt
+and not as a detached operator note. Any operator or runtime surface that
+captures approval for a `NeedsApproval` decision must call
+`Store::record_approval`, which appends `ApprovalRecorded` to the session
+journal after validating the evidence against the current daemon projection.
+Raw `ApprovalRecorded` appends through the generic journal path are refused.
+
+Each approval is bound to the proposed action and the policy context that
+reviewed it: `action_id`, `manifest_hash`, `grant_id`, `reviewer_id`,
+`approved_at`, and `policy_version` (with `review_id` as the approval event
+identifier). The daemon rejects approval evidence for unknown actions, unknown
+grants, mismatched manifest hashes, unsupported policy versions, or approvals
+that predate the action proposal.
+
+Once recorded, approval evidence becomes part of the admission projection used
+by the next `action propose`, runtime bundle admission, or gateway execution
+attempt for the same action manifest. That re-admission can move a previously
+`NeedsApproval` action to `Allowed` without inventing a receipt or claiming that
+any side effect already happened. Receipts remain reserved for observed
+post-execution outcomes and still require a prior `Allowed` decision.
+
+The HTTP control plane exposes the same path as
+`POST /v1/sessions/<id>/actions/<action_id>/approval`. It records only
+action-bound evidence for the current `NeedsApproval` decision, rejects unknown
+or unrelated grants, and can optionally re-run admission for the same manifest
+with `readmit: true`. The route returns `approval_seq`, `approval_hash`,
+`final_journal_root_hash`, and optional `readmission` fields; it does not create
+receipts, leases, or side effects.
 
 ## Worked MVP flow
 
@@ -489,6 +636,10 @@ resume, restore, or live replay path.
   receipt requirement.
 - **Policy outside the model.** Admission is computed by `PolicyEngine`, which
   has no model dependency.
+- **Approvals before re-admission, not receipts.** Action-bound approval
+  evidence is recorded through `Store::record_approval` and can unblock a later
+  admission decision for the same `action_id`/`manifest_hash`/`grant_id` under
+  the same `policy_version`; it does not prove execution or replace a receipt.
 - **Journal before side effects.** `ActionProposed`, `PolicyDecided`, and for
   real gateway execution `ExecutionLeaseIssued` are written by the daemon before
   any side-effecting process can spawn or any receipt can exist.
@@ -512,7 +663,9 @@ Session projection responses include recovery fields:
 `execution_reconciliations`, `recovery_blocked`, `admission_blocked`, and
 `admission_blockers`, so operators and schedulers can see when runtime work is
 ready to dispatch, paused by session state, or blocked by an unresolved
-execution lease without requesting a full trace export.
+execution lease without requesting a full trace export. Full daemon store
+projection and trace export include action-bound approvals for operator review
+and offline admission debugging.
 
 ```console
 $ printf '%s\n' 'replace-with-operator-token' > .beateros/token
@@ -530,6 +683,8 @@ binary that sits above the store and the tool gateway. It preserves the same
 loopback, `Host`/`Origin`, and bearer-token boundary, and adds:
 
 - `POST /v1/sessions/<id>/actions/execute-local-shell`
+- `POST /v1/sessions/<id>/actions/<action_id>/approval`
+- `POST /v1/sessions/<id>/model-routes/choose`
 - `POST /v1/sessions/<id>/actions/<action_id>/claims`
 - `POST /v1/sessions/<id>/actions/<action_id>/claims/<lease_id>/complete`
 - `POST /v1/runtime/bundles`
@@ -576,6 +731,50 @@ gateway, sandbox confinement, and receipt path. A token-authorized bundle may
 bootstrap a new session and its declared root capability, so this route is an
 authenticated authority-minting surface for new runtime work, not a read-only
 replay or import API.
+
+`POST /v1/sessions/<id>/model-routes/choose` is the daemon HTTP boundary for
+metadata-only model route selection. The daemon must be started with
+`--model-route-catalog <routes.json>` so route metadata comes from local
+configuration or generated client code, not model-authored text. The body
+carries one proposed call request; both the body `session_id` and nested request
+`session_id` must match the route path.
+The daemon projects the session, applies its `ModelPolicy`, journals compact
+`ModelRouteDecided` evidence, and returns a `ModelRouteDecision`, journal
+seq/hash, and projection summary. It performs no provider call, sends no prompt
+data, creates no grant, and writes no receipt.
+
+`POST /v1/sessions/<id>/memory/records` is the daemon HTTP boundary for
+appending one non-authoritative `MemoryWritten` event. The body carries a
+top-level `session_id` and a `memory` object; the path and body session ids must
+match. The daemon writes only while the session is running and rejects records
+whose `source_event_id` is not already anchored in that session journal. The
+response returns `memory_seq`, `memory_journal_hash`, and
+`final_journal_root_hash`.
+
+`POST /v1/sessions/<id>/memory/context/select` is the daemon HTTP boundary for
+bounded memory context selection. The body is a `RuntimeMemoryContextRequest`;
+the path and body session ids must match. The selector applies
+`AgentSession.memory_scope`, access-policy, sensitivity, source taint,
+source data-class, confidence, writer, redaction, and provenance filters under
+one store snapshot. Selected memory is context evidence only, never a grant,
+approval, receipt, route decision, or trusted instruction.
+
+The direct-store CLI equivalent is:
+
+```text
+beaterosctl model-route choose --session <id> \
+  --routes-file <trusted-routes.json> \
+  --request-file <model-route-request.json>
+```
+
+`--routes-file` must contain a JSON array of trusted `ModelRoute` metadata and
+`--request-file` must contain one `ModelRouteRequest`. The request `session_id`
+must match `--session`; the CLI reads the session from `beater-osd::Store`, uses
+that session's `ModelPolicy`, refuses non-running sessions, applies
+`budget.max_model_cents` as an upper bound on request cost, and prints JSON
+containing the `ModelRouteDecision` plus projection counts. It is still
+metadata-only: it does not call a provider, send prompt data, mint authority, or
+append journal/receipt events.
 
 `POST /v1/sessions/<id>/actions/execute-local-shell` also acts as the first
 dispatch bridge for scheduler-visible runnable work. When the request supplies
