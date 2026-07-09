@@ -5,7 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Loopback HTTP control-plane binary for the beaterOS daemon store."
+description = "Loopback HTTP control-plane binary for the tempOS daemon store."
 
 [[bin]]
 name = "beater-osd-http"

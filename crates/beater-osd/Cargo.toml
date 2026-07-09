@@ -5,7 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Durable single-writer runtime store for the beaterOS local daemon."
+description = "Durable single-writer runtime store for the tempOS local daemon."
 
 [dependencies]
 beater-os-core = { path = "../beater-os-core" }
