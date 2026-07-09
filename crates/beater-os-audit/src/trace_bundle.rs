@@ -8,9 +8,10 @@
 //! contain sensitive data.
 
 use beater_os_core::{
-    ActionManifest, AgentSession, ApprovalEvidence, CapabilityGrant, CapabilityReceipt,
-    InMemoryJournal, JournalEvent, JournalRecord, JournalSnapshot, PaymentMandate, PolicyDecision,
-    ReceiptLedger, SessionStatus, SimulationEvidence,
+    ActionManifest, AgentSession, ApprovalDenialEvidence, ApprovalEvidence, CapabilityGrant,
+    CapabilityReceipt, HumanReviewRequest, InMemoryJournal, JournalEvent, JournalRecord,
+    JournalSnapshot, PaymentMandate, PolicyDecision, ReceiptLedger, SessionStatus,
+    SimulationEvidence,
 };
 use serde::{Deserialize, Serialize};
 
@@ -29,7 +30,9 @@ pub struct TraceBundle {
     pub sessions: Vec<AgentSession>,
     pub grants: Vec<CapabilityGrant>,
     pub payment_mandates: Vec<PaymentMandate>,
+    pub human_review_requests: Vec<HumanReviewRequest>,
     pub approvals: Vec<ApprovalEvidence>,
+    pub approval_denials: Vec<ApprovalDenialEvidence>,
     pub simulations: Vec<SimulationEvidence>,
     pub manifests: Vec<ActionManifest>,
     pub decisions: Vec<PolicyDecision>,
@@ -59,7 +62,9 @@ pub struct TraceBundleVerificationReport {
     pub receipt_root_hash: String,
     pub grants: usize,
     pub payment_mandates: usize,
+    pub human_review_requests: usize,
     pub approvals: usize,
+    pub approval_denials: usize,
     pub simulations: usize,
     pub manifests: usize,
     pub decisions: usize,
@@ -72,7 +77,9 @@ struct ProjectedTrace {
     sessions: Vec<AgentSession>,
     grants: Vec<CapabilityGrant>,
     payment_mandates: Vec<PaymentMandate>,
+    human_review_requests: Vec<HumanReviewRequest>,
     approvals: Vec<ApprovalEvidence>,
+    approval_denials: Vec<ApprovalDenialEvidence>,
     simulations: Vec<SimulationEvidence>,
     manifests: Vec<ActionManifest>,
     decisions: Vec<PolicyDecision>,
@@ -170,9 +177,21 @@ pub fn verify_trace_bundle_with_options(
     );
     push_section_check(
         &mut checks,
+        "human_review_requests",
+        &bundle.human_review_requests,
+        &projected.human_review_requests,
+    );
+    push_section_check(
+        &mut checks,
         "approvals",
         &bundle.approvals,
         &projected.approvals,
+    );
+    push_section_check(
+        &mut checks,
+        "approval_denials",
+        &bundle.approval_denials,
+        &projected.approval_denials,
     );
     push_section_check(
         &mut checks,
@@ -224,7 +243,9 @@ pub fn verify_trace_bundle_with_options(
         receipt_root_hash: receipt_ledger.root_hash(),
         grants: projected.grants.len(),
         payment_mandates: projected.payment_mandates.len(),
+        human_review_requests: projected.human_review_requests.len(),
         approvals: projected.approvals.len(),
+        approval_denials: projected.approval_denials.len(),
         simulations: projected.simulations.len(),
         manifests: projected.manifests.len(),
         decisions: projected.decisions.len(),
@@ -285,8 +306,14 @@ fn project_trace_from_journal(records: &[JournalRecord]) -> Result<ProjectedTrac
             JournalEvent::ExecutionLeaseIssued { .. }
             | JournalEvent::ExecutionLeaseHeartbeated { .. }
             | JournalEvent::ExecutionLeaseReconciled { .. } => {}
+            JournalEvent::HumanReviewRequested { request } => {
+                projected.human_review_requests.push(request.clone());
+            }
             JournalEvent::ApprovalRecorded { approval } => {
                 projected.approvals.push(approval.clone());
+            }
+            JournalEvent::ApprovalDenied { denial } => {
+                projected.approval_denials.push(denial.clone());
             }
             JournalEvent::SimulationRecorded { simulation } => {
                 projected.simulations.push(simulation.clone());
@@ -357,7 +384,9 @@ mod tests {
             sessions: Vec::new(),
             grants: Vec::new(),
             payment_mandates: Vec::new(),
+            human_review_requests: Vec::new(),
             approvals: Vec::new(),
+            approval_denials: Vec::new(),
             simulations: Vec::new(),
             manifests: Vec::new(),
             decisions: Vec::new(),

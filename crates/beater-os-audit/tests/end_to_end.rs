@@ -307,7 +307,9 @@ fn trace_bundle_from_snapshot(snapshot: &JournalSnapshot) -> TraceBundle {
         sessions: Vec::new(),
         grants: Vec::new(),
         payment_mandates: Vec::new(),
+        human_review_requests: Vec::new(),
         approvals: Vec::new(),
+        approval_denials: Vec::new(),
         simulations: Vec::new(),
         manifests: Vec::new(),
         decisions: Vec::new(),
@@ -325,7 +327,13 @@ fn trace_bundle_from_snapshot(snapshot: &JournalSnapshot) -> TraceBundle {
                 bundle.manifests.push((**manifest).clone())
             }
             JournalEvent::PolicyDecided { decision } => bundle.decisions.push(decision.clone()),
+            JournalEvent::HumanReviewRequested { request } => {
+                bundle.human_review_requests.push(request.clone());
+            }
             JournalEvent::ApprovalRecorded { approval } => bundle.approvals.push(approval.clone()),
+            JournalEvent::ApprovalDenied { denial } => {
+                bundle.approval_denials.push(denial.clone());
+            }
             JournalEvent::SimulationRecorded { simulation } => {
                 bundle.simulations.push(simulation.clone());
             }

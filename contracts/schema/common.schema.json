@@ -190,6 +190,38 @@
         "policy_version": { "type": "string" }
       }
     },
+    "approval_denial_evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["review_id", "action_id", "manifest_hash", "reviewer_id", "reason", "denied_at", "policy_version"],
+      "properties": {
+        "review_id": { "type": "string", "minLength": 1 },
+        "action_id": { "type": "string", "minLength": 1 },
+        "manifest_hash": { "$ref": "#/$defs/hash_value" },
+        "reviewer_id": { "type": "string", "minLength": 1 },
+        "reason": { "type": "string", "minLength": 1 },
+        "denied_at": { "$ref": "#/$defs/timestamp" },
+        "policy_version": { "type": "string", "minLength": 1 }
+      }
+    },
+    "human_review_request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["review_id", "session_id", "action_id", "manifest_hash", "risk_class", "preview_ref", "policy_version", "created_at"],
+      "properties": {
+        "review_id": { "type": "string", "minLength": 1 },
+        "session_id": { "type": "string", "minLength": 1 },
+        "action_id": { "type": "string", "minLength": 1 },
+        "manifest_hash": { "$ref": "#/$defs/hash_value" },
+        "required_review": { "type": "string", "minLength": 1 },
+        "required_grants": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+        "reviewer_ids": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+        "risk_class": { "$ref": "#/$defs/risk_class" },
+        "preview_ref": { "type": "string", "minLength": 1 },
+        "policy_version": { "type": "string", "minLength": 1 },
+        "created_at": { "$ref": "#/$defs/timestamp" }
+      }
+    },
     "simulation_evidence": {
       "type": "object",
       "additionalProperties": false,

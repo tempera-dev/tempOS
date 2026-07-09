@@ -4,10 +4,10 @@ use chrono::{DateTime, TimeDelta, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::contracts::{
-    ActionKind, ActionManifest, AgentSession, ApprovalEvidence, CapabilityGrant, DecisionResult,
-    ExecutionLease, ExecutionLeaseHeartbeat, ExecutionLeaseReconciliation, MemoryRecord,
-    PaymentIntent, PaymentMandate, PolicyDecision, ScenarioManifest, SessionStatus,
-    SideEffectClass, SimulationEvidence,
+    ActionKind, ActionManifest, AgentSession, ApprovalDenialEvidence, ApprovalEvidence,
+    CapabilityGrant, DecisionResult, ExecutionLease, ExecutionLeaseHeartbeat,
+    ExecutionLeaseReconciliation, HumanReviewRequest, MemoryRecord, PaymentIntent, PaymentMandate,
+    PolicyDecision, ScenarioManifest, SessionStatus, SideEffectClass, SimulationEvidence,
 };
 use crate::error::{BeaterOsError, BeaterOsResult};
 use crate::hash::{GENESIS_HASH, HashValue, hash_json};
@@ -47,6 +47,9 @@ pub enum JournalEvent {
     PolicyDecided {
         decision: PolicyDecision,
     },
+    HumanReviewRequested {
+        request: HumanReviewRequest,
+    },
     ExecutionLeaseIssued {
         lease: ExecutionLease,
     },
@@ -58,6 +61,9 @@ pub enum JournalEvent {
     },
     ApprovalRecorded {
         approval: ApprovalEvidence,
+    },
+    ApprovalDenied {
+        denial: ApprovalDenialEvidence,
     },
     SimulationRecorded {
         simulation: SimulationEvidence,
@@ -221,7 +227,10 @@ struct CausalityState {
     issued_mandates: BTreeMap<String, PaymentMandate>,
     allowed_decisions: BTreeMap<String, HashValue>,
     allowed_decision_ids: BTreeMap<String, String>,
+    latest_policy_decisions: BTreeMap<String, PolicyDecision>,
     latest_decision_by_action: BTreeMap<String, DecisionResult>,
+    review_requests: BTreeMap<String, HumanReviewRequest>,
+    denied_review_actions: BTreeSet<String>,
     open_execution_leases: BTreeMap<String, ExecutionLease>,
     reconciled_execution_actions: BTreeMap<String, String>,
     receipted_actions: BTreeSet<String>,
@@ -396,6 +405,9 @@ fn verify_event_causality(
             state
                 .latest_decision_by_action
                 .insert(decision.action_id.clone(), decision.result.clone());
+            state
+                .latest_policy_decisions
+                .insert(decision.action_id.clone(), decision.clone());
             if decision.result == DecisionResult::Allowed {
                 for required in &manifest.required_grants {
                     let Some(grant) = state.issued_grants.get(required) else {
@@ -429,6 +441,117 @@ fn verify_event_causality(
             } else {
                 state.allowed_decisions.remove(&decision.action_id);
                 state.allowed_decision_ids.remove(&decision.action_id);
+            }
+        }
+        JournalEvent::HumanReviewRequested { request } => {
+            let Some(manifest) = state.proposed_actions.get(&request.action_id) else {
+                return causality_error(
+                    record.seq,
+                    format!(
+                        "human review request {} references action {} before it was proposed",
+                        request.review_id, request.action_id
+                    ),
+                );
+            };
+            if manifest.session_id != request.session_id {
+                return causality_error(
+                    record.seq,
+                    format!(
+                        "human review request {} session {} does not match action session {}",
+                        request.review_id, request.session_id, manifest.session_id
+                    ),
+                );
+            }
+            if manifest.digest()? != request.manifest_hash {
+                return causality_error(
+                    record.seq,
+                    format!(
+                        "human review request {} manifest hash does not match action {}",
+                        request.review_id, request.action_id
+                    ),
+                );
+            }
+            let Some(decision) = state.latest_policy_decisions.get(&request.action_id) else {
+                return causality_error(
+                    record.seq,
+                    format!(
+                        "human review request {} references action {} without a policy decision",
+                        request.review_id, request.action_id
+                    ),
+                );
+            };
+            if decision.result != DecisionResult::NeedsApproval {
+                return causality_error(
+                    record.seq,
+                    format!(
+                        "human review request {} references action {} without a latest NeedsApproval decision",
+                        request.review_id, request.action_id
+                    ),
+                );
+            }
+            if decision.manifest_hash != request.manifest_hash {
+                return causality_error(
+                    record.seq,
+                    format!(
+                        "human review request {} manifest hash does not match decision {}",
+                        request.review_id, decision.decision_id
+                    ),
+                );
+            }
+            if decision.required_review != request.required_review {
+                return causality_error(
+                    record.seq,
+                    format!(
+                        "human review request {} required review does not match decision {}",
+                        request.review_id, decision.decision_id
+                    ),
+                );
+            }
+            if decision.policy_version != request.policy_version {
+                return causality_error(
+                    record.seq,
+                    format!(
+                        "human review request {} policy version does not match decision {}",
+                        request.review_id, decision.decision_id
+                    ),
+                );
+            }
+            if !request.required_grants.is_subset(&manifest.required_grants) {
+                return causality_error(
+                    record.seq,
+                    format!(
+                        "human review request {} names grants not required by action {}",
+                        request.review_id, request.action_id
+                    ),
+                );
+            }
+            if request.preview_ref.trim().is_empty() {
+                return causality_error(
+                    record.seq,
+                    format!(
+                        "human review request {} has empty preview ref",
+                        request.review_id
+                    ),
+                );
+            }
+            if request.created_at > record.created_at {
+                return causality_error(
+                    record.seq,
+                    format!("human review request {} is future-dated", request.review_id),
+                );
+            }
+            if state
+                .review_requests
+                .insert(request.action_id.clone(), request.clone())
+                .is_some()
+            {
+                return causality_error(
+                    record.seq,
+                    format!(
+                        "human review for action {} was requested more than once without a new action id",
+                        request.action_id
+                    ),
+                );
             }
         }
         JournalEvent::ExecutionLeaseIssued { lease } => {
@@ -522,10 +645,136 @@ fn verify_event_causality(
                     ),
                 );
             }
+            let Some(request) = state.review_requests.get(&approval.action_id) else {
+                return causality_error(
+                    record.seq,
+                    format!(
+                        "approval {} references action {} without a pending human review request",
+                        approval.review_id, approval.action_id
+                    ),
+                );
+            };
+            if request.manifest_hash != approval.manifest_hash {
+                return causality_error(
+                    record.seq,
+                    format!(
+                        "approval {} manifest hash does not match review request {}",
+                        approval.review_id, request.review_id
+                    ),
+                );
+            }
+            if !request.reviewer_ids.is_empty()
+                && !request.reviewer_ids.contains(&approval.reviewer_id)
+            {
+                return causality_error(
+                    record.seq,
+                    format!(
+                        "approval {} reviewer {} is not allowed for review request {}",
+                        approval.review_id, approval.reviewer_id, request.review_id
+                    ),
+                );
+            }
+            if state.denied_review_actions.contains(&approval.action_id) {
+                return causality_error(
+                    record.seq,
+                    format!(
+                        "approval {} references action {} after a recorded denial",
+                        approval.review_id, approval.action_id
+                    ),
+                );
+            }
             if approval.approved_at > record.created_at {
                 return causality_error(
                     record.seq,
                     format!("approval {} is future-dated", approval.review_id),
+                );
+            }
+        }
+        JournalEvent::ApprovalDenied { denial } => {
+            if state
+                .review_ids
+                .insert(denial.review_id.clone(), ())
+                .is_some()
+            {
+                return causality_error(
+                    record.seq,
+                    format!("review {} was recorded more than once", denial.review_id),
+                );
+            }
+            let Some(manifest) = state.proposed_actions.get(&denial.action_id) else {
+                return causality_error(
+                    record.seq,
+                    format!(
+                        "review denial {} references action {} before it was proposed",
+                        denial.review_id, denial.action_id
+                    ),
+                );
+            };
+            if manifest.digest()? != denial.manifest_hash {
+                return causality_error(
+                    record.seq,
+                    format!(
+                        "review denial {} manifest hash does not match action {}",
+                        denial.review_id, denial.action_id
+                    ),
+                );
+            }
+            if state.latest_decision_by_action.get(&denial.action_id)
+                != Some(&DecisionResult::NeedsApproval)
+            {
+                return causality_error(
+                    record.seq,
+                    format!(
+                        "review denial {} references action {} without a latest NeedsApproval decision",
+                        denial.review_id, denial.action_id
+                    ),
+                );
+            }
+            let Some(request) = state.review_requests.get(&denial.action_id) else {
+                return causality_error(
+                    record.seq,
+                    format!(
+                        "review denial {} references action {} without a pending human review request",
+                        denial.review_id, denial.action_id
+                    ),
+                );
+            };
+            if request.manifest_hash != denial.manifest_hash {
+                return causality_error(
+                    record.seq,
+                    format!(
+                        "review denial {} manifest hash does not match review request {}",
+                        denial.review_id, request.review_id
+                    ),
+                );
+            }
+            if !request.reviewer_ids.is_empty()
+                && !request.reviewer_ids.contains(&denial.reviewer_id)
+            {
+                return causality_error(
+                    record.seq,
+                    format!(
+                        "review denial {} reviewer {} is not allowed for review request {}",
+                        denial.review_id, denial.reviewer_id, request.review_id
+                    ),
+                );
+            }
+            if denial.reason.trim().is_empty() {
+                return causality_error(
+                    record.seq,
+                    format!("review denial {} has empty reason", denial.review_id),
+                );
+            }
+            if denial.denied_at > record.created_at {
+                return causality_error(
+                    record.seq,
+                    format!("review denial {} is future-dated", denial.review_id),
+                );
+            }
+            if !state.denied_review_actions.insert(denial.action_id.clone()) {
+                return causality_error(
+                    record.seq,
+                    format!("action {} was denied more than once", denial.action_id),
                 );
             }
         }
@@ -1588,6 +1837,8 @@ fn primary_event_id(record: &JournalRecord) -> Option<&str> {
             Some(reconciliation.reconciliation_id.as_str())
         }
         JournalEvent::ApprovalRecorded { approval } => Some(approval.review_id.as_str()),
+        JournalEvent::HumanReviewRequested { request } => Some(request.review_id.as_str()),
+        JournalEvent::ApprovalDenied { denial } => Some(denial.review_id.as_str()),
         JournalEvent::SimulationRecorded { simulation } => Some(simulation.simulation_id.as_str()),
         JournalEvent::ReceiptAppended { receipt } => Some(receipt.receipt_id.as_str()),
         // Memory ids are mutable projection keys: `beater-os-memory` explicitly

@@ -167,6 +167,17 @@ pub struct ApprovalEvidence {
     pub policy_version: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ApprovalDenialEvidence {
+    pub review_id: String,
+    pub action_id: String,
+    pub manifest_hash: HashValue,
+    pub reviewer_id: String,
+    pub reason: String,
+    pub denied_at: DateTime<Utc>,
+    pub policy_version: String,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Budget {
     #[serde(default)]
@@ -738,11 +749,18 @@ pub struct ToolManifest {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HumanReviewRequest {
     pub review_id: String,
+    pub session_id: String,
     pub action_id: String,
+    pub manifest_hash: HashValue,
+    #[serde(default)]
+    pub required_review: Option<String>,
+    #[serde(default)]
+    pub required_grants: BTreeSet<String>,
+    #[serde(default)]
+    pub reviewer_ids: Vec<String>,
     pub risk_class: RiskClass,
     pub preview_ref: String,
-    pub required_decision: String,
-    pub reviewer_id: String,
+    pub policy_version: String,
     pub created_at: DateTime<Utc>,
 }
 
