@@ -5,9 +5,9 @@ use beater_os_core::{
     ApprovalRequirement, BeaterOsError, Budget, CapabilityGrant, CapabilityReceipt,
     CapabilityReceiptInput, CapabilityScope, CapabilitySelector, DataClass, DecisionResult,
     DelegationMode, GrantConstraints, HashValue, InMemoryJournal, JournalEvent, MemoryRecord,
-    PaymentIntent, PaymentMandate, PaymentReceiptEvidence, PaymentSettlementStatus, PolicyDecision,
-    PolicyEngine, ReceiptLedger, ResourceKind, RiskClass, SessionStatus, SideEffectClass,
-    SimulationEvidence, TaintLabel, ToolManifest, hash_json,
+    ModelRouteDecisionRecord, PaymentIntent, PaymentMandate, PaymentReceiptEvidence,
+    PaymentSettlementStatus, PolicyDecision, PolicyEngine, ReceiptLedger, ResourceKind, RiskClass,
+    SessionStatus, SideEffectClass, SimulationEvidence, TaintLabel, ToolManifest, hash_json,
 };
 use chrono::{Duration, TimeZone, Utc};
 use serde::Serialize;
@@ -1668,6 +1668,29 @@ fn journal_rejects_decision_for_stale_manifest_hash() -> Result<(), Box<dyn std:
         now,
     )?;
     assert!(journal.verify_chain().is_err());
+    Ok(())
+}
+
+#[test]
+fn model_route_decision_record_defaults_compact_denials() -> Result<(), Box<dyn std::error::Error>>
+{
+    let now = fixed_time().to_rfc3339();
+    let record: ModelRouteDecisionRecord = serde_json::from_value(serde_json::json!({
+        "decision_id": "1111111111111111111111111111111111111111111111111111111111111111",
+        "session_id": "session-1",
+        "result": "denied",
+        "request_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "catalog_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "policy_hash": "4444444444444444444444444444444444444444444444444444444444444444",
+        "decision_payload_hash": "5555555555555555555555555555555555555555555555555555555555555555",
+        "requested_at": now,
+        "recorded_at": now
+    }))?;
+
+    assert_eq!(record.selected_route_id, None);
+    assert_eq!(record.selected_route_hash, None);
+    assert!(record.candidate_route_ids.is_empty());
+    assert!(record.rejected_route_ids.is_empty());
     Ok(())
 }
 
