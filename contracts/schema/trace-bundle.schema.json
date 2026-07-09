@@ -22,6 +22,11 @@
       "items": { "$ref": "journal.schema.json#/$defs/model_route_decision_record" },
       "default": []
     },
+    "memory_records": {
+      "type": "array",
+      "items": { "$ref": "memory-record.schema.json" },
+      "default": []
+    },
     "receipts": { "type": "array", "items": { "$ref": "capability-receipt.schema.json" } },
     "journal": { "type": "array", "items": { "$ref": "journal.schema.json" } }
   }

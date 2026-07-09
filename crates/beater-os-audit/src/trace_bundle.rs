@@ -9,8 +9,9 @@
 
 use beater_os_core::{
     ActionManifest, AgentSession, ApprovalEvidence, CapabilityGrant, CapabilityReceipt,
-    InMemoryJournal, JournalEvent, JournalRecord, JournalSnapshot, ModelRouteDecisionRecord,
-    PaymentMandate, PolicyDecision, ReceiptLedger, SessionStatus, SimulationEvidence,
+    InMemoryJournal, JournalEvent, JournalRecord, JournalSnapshot, MemoryRecord,
+    ModelRouteDecisionRecord, PaymentMandate, PolicyDecision, ReceiptLedger, SessionStatus,
+    SimulationEvidence,
 };
 use serde::{Deserialize, Serialize};
 
@@ -35,6 +36,8 @@ pub struct TraceBundle {
     pub decisions: Vec<PolicyDecision>,
     #[serde(default)]
     pub model_route_decisions: Vec<ModelRouteDecisionRecord>,
+    #[serde(default)]
+    pub memory_records: Vec<MemoryRecord>,
     pub receipts: Vec<CapabilityReceipt>,
     pub journal: Vec<JournalRecord>,
 }
@@ -66,6 +69,7 @@ pub struct TraceBundleVerificationReport {
     pub manifests: usize,
     pub decisions: usize,
     pub model_route_decisions: usize,
+    pub memory_records: usize,
     pub receipts: usize,
     pub checks: Vec<CheckResult>,
 }
@@ -80,6 +84,7 @@ struct ProjectedTrace {
     manifests: Vec<ActionManifest>,
     decisions: Vec<PolicyDecision>,
     model_route_decisions: Vec<ModelRouteDecisionRecord>,
+    memory_records: Vec<MemoryRecord>,
     receipts: Vec<CapabilityReceipt>,
 }
 
@@ -204,6 +209,12 @@ pub fn verify_trace_bundle_with_options(
     );
     push_section_check(
         &mut checks,
+        "memory_records",
+        &bundle.memory_records,
+        &projected.memory_records,
+    );
+    push_section_check(
+        &mut checks,
         "receipts",
         &bundle.receipts,
         &projected.receipts,
@@ -239,6 +250,7 @@ pub fn verify_trace_bundle_with_options(
         manifests: projected.manifests.len(),
         decisions: projected.decisions.len(),
         model_route_decisions: projected.model_route_decisions.len(),
+        memory_records: projected.memory_records.len(),
         receipts: projected.receipts.len(),
         checks,
     }
@@ -306,9 +318,10 @@ fn project_trace_from_journal(records: &[JournalRecord]) -> Result<ProjectedTrac
             JournalEvent::ModelRouteDecided { decision } => {
                 projected.model_route_decisions.push(decision.clone());
             }
-            JournalEvent::MemoryWritten { .. }
-            | JournalEvent::ScenarioEvaluated { .. }
-            | JournalEvent::IncidentAnnotated { .. } => {}
+            JournalEvent::MemoryWritten { memory } => {
+                projected.memory_records.push(memory.clone());
+            }
+            JournalEvent::ScenarioEvaluated { .. } | JournalEvent::IncidentAnnotated { .. } => {}
         }
     }
     if projected
@@ -402,6 +415,7 @@ mod tests {
             manifests: Vec::new(),
             decisions: Vec::new(),
             model_route_decisions: Vec::new(),
+            memory_records: Vec::new(),
             receipts: Vec::new(),
             journal: Vec::new(),
         }
@@ -414,6 +428,7 @@ mod tests {
         assert!(json.contains("\"bundle_id\""));
         assert!(json.contains("\"sessions\""));
         assert!(json.contains("\"model_route_decisions\""));
+        assert!(json.contains("\"memory_records\""));
         assert!(json.contains("\"journal\""));
         assert!(!json.contains("\"description\""));
     }
@@ -435,6 +450,7 @@ mod tests {
         }"#;
         let bundle: TraceBundle = serde_json::from_str(json).expect("old bundle shape");
         assert!(bundle.model_route_decisions.is_empty());
+        assert!(bundle.memory_records.is_empty());
     }
 
     #[test]
@@ -465,6 +481,56 @@ mod tests {
                     && check.outcome == CheckOutcome::Fail
             }),
             "expected model route decision section mismatch, got {report:?}"
+        );
+    }
+
+    fn memory_record() -> MemoryRecord {
+        MemoryRecord {
+            memory_id: "mem-route".to_string(),
+            source_event_id: "session-route".to_string(),
+            source_digest: "sha256:source".to_string(),
+            writer: "agent:memory".to_string(),
+            created_at: Utc.with_ymd_and_hms(2026, 7, 9, 0, 0, 0).unwrap(),
+            scope: Some("scope:trace".to_string()),
+            kind: "summary".to_string(),
+            content_ref: "memory://mem-route".to_string(),
+            summary: "Route memory trace fixture".to_string(),
+            confidence_basis_points: 9_000,
+            sensitivity: beater_os_core::DataClass::Internal,
+            source_taint: BTreeSet::new(),
+            source_data_classes: BTreeSet::new(),
+            expires_at: None,
+            access_policy: "runtime_context".to_string(),
+        }
+    }
+
+    #[test]
+    fn memory_records_project_from_journal() {
+        let memory = memory_record();
+        let record = JournalRecord {
+            seq: 0,
+            created_at: memory.created_at,
+            event: JournalEvent::MemoryWritten {
+                memory: memory.clone(),
+            },
+            prev_hash: "0000000000000000000000000000000000000000000000000000000000000000"
+                .to_string(),
+            hash: "7777777777777777777777777777777777777777777777777777777777777777".to_string(),
+        };
+        let projected = project_trace_from_journal(&[record]).expect("project trace");
+        assert_eq!(projected.memory_records, vec![memory]);
+    }
+
+    #[test]
+    fn forged_memory_record_section_fails_verification() {
+        let mut bundle = empty_trace_bundle();
+        bundle.memory_records.push(memory_record());
+        let report = verify_trace_bundle(&bundle);
+        assert!(
+            report.checks.iter().any(|check| {
+                check.check == "trace_bundle_memory_records" && check.outcome == CheckOutcome::Fail
+            }),
+            "expected memory record section mismatch, got {report:?}"
         );
     }
 }
