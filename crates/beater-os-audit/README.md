@@ -40,6 +40,10 @@ the same code path that *produced* it. It re-derives the audit invariants from
 - **Expected-root verification** — `verify --expected-root <hash>` compares the
   snapshot root against an external anchor, so a valid prefix or coherent
   re-hash can be detected relative to the trusted hand-off value.
+- **Full trace lease evidence** — `verify-trace` compares exported
+  `execution_leases`, `execution_lease_heartbeats`, and
+  `execution_reconciliations` against their journal events in append order. This
+  is lifecycle evidence, not the current scheduler/open-lease projection.
 - **Full trace route evidence** — `verify-trace` compares exported compact
   `model_route_decisions` against `ModelRouteDecided` journal events so routing
   evidence stays replayable without embedding full catalogs, prompts, or

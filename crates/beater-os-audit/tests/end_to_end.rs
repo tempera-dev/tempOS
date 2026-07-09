@@ -311,6 +311,9 @@ fn trace_bundle_from_snapshot(snapshot: &JournalSnapshot) -> TraceBundle {
         simulations: Vec::new(),
         manifests: Vec::new(),
         decisions: Vec::new(),
+        execution_leases: Vec::new(),
+        execution_lease_heartbeats: Vec::new(),
+        execution_reconciliations: Vec::new(),
         model_route_decisions: Vec::new(),
         memory_records: Vec::new(),
         receipts: Vec::new(),
@@ -327,6 +330,17 @@ fn trace_bundle_from_snapshot(snapshot: &JournalSnapshot) -> TraceBundle {
                 bundle.manifests.push((**manifest).clone())
             }
             JournalEvent::PolicyDecided { decision } => bundle.decisions.push(decision.clone()),
+            JournalEvent::ExecutionLeaseIssued { lease } => {
+                bundle.execution_leases.push(lease.clone());
+            }
+            JournalEvent::ExecutionLeaseHeartbeated { heartbeat } => {
+                bundle.execution_lease_heartbeats.push(heartbeat.clone());
+            }
+            JournalEvent::ExecutionLeaseReconciled { reconciliation } => {
+                bundle
+                    .execution_reconciliations
+                    .push(reconciliation.clone());
+            }
             JournalEvent::ModelRouteDecided { decision } => {
                 bundle.model_route_decisions.push(decision.clone());
             }
@@ -340,9 +354,6 @@ fn trace_bundle_from_snapshot(snapshot: &JournalSnapshot) -> TraceBundle {
             JournalEvent::ReceiptAppended { receipt } => bundle.receipts.push(receipt.clone()),
             JournalEvent::SessionStatusChanged { .. }
             | JournalEvent::CapabilityRevoked { .. }
-            | JournalEvent::ExecutionLeaseIssued { .. }
-            | JournalEvent::ExecutionLeaseHeartbeated { .. }
-            | JournalEvent::ExecutionLeaseReconciled { .. }
             | JournalEvent::ScenarioEvaluated { .. }
             | JournalEvent::IncidentAnnotated { .. } => {}
         }

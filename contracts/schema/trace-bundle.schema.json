@@ -17,6 +17,21 @@
     "simulations": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/simulation_evidence" } },
     "manifests": { "type": "array", "items": { "$ref": "action-manifest.schema.json" } },
     "decisions": { "type": "array", "items": { "$ref": "policy-decision.schema.json" } },
+    "execution_leases": {
+      "type": "array",
+      "items": { "$ref": "common.schema.json#/$defs/execution_lease" },
+      "default": []
+    },
+    "execution_lease_heartbeats": {
+      "type": "array",
+      "items": { "$ref": "common.schema.json#/$defs/execution_lease_heartbeat" },
+      "default": []
+    },
+    "execution_reconciliations": {
+      "type": "array",
+      "items": { "$ref": "common.schema.json#/$defs/execution_lease_reconciliation" },
+      "default": []
+    },
     "model_route_decisions": {
       "type": "array",
       "items": { "$ref": "journal.schema.json#/$defs/model_route_decision_record" },

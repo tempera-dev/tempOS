@@ -123,6 +123,37 @@ def check_trace_bundle(rep: Report, reg, path: Path) -> None:
     # Hash chains + causality.
     rep.add_errors(f"trace {name} receipt-chain", journalcheck.verify_receipt_chain(bundle.get("receipts", [])))
     rep.add_errors(f"trace {name} journal-chain", journalcheck.verify_journal_chain(bundle.get("journal", [])))
+    projected_execution_leases = [
+        record.get("event", {}).get("lease")
+        for record in bundle.get("journal", [])
+        if record.get("event", {}).get("kind") == "execution_lease_issued"
+    ]
+    rep.check(
+        bundle.get("execution_leases", []) == projected_execution_leases,
+        f"trace {name} execution-leases",
+        "top-level execution_leases must match execution_lease_issued journal events",
+    )
+    projected_execution_lease_heartbeats = [
+        record.get("event", {}).get("heartbeat")
+        for record in bundle.get("journal", [])
+        if record.get("event", {}).get("kind") == "execution_lease_heartbeated"
+    ]
+    rep.check(
+        bundle.get("execution_lease_heartbeats", [])
+        == projected_execution_lease_heartbeats,
+        f"trace {name} execution-lease-heartbeats",
+        "top-level execution_lease_heartbeats must match execution_lease_heartbeated journal events",
+    )
+    projected_execution_reconciliations = [
+        record.get("event", {}).get("reconciliation")
+        for record in bundle.get("journal", [])
+        if record.get("event", {}).get("kind") == "execution_lease_reconciled"
+    ]
+    rep.check(
+        bundle.get("execution_reconciliations", []) == projected_execution_reconciliations,
+        f"trace {name} execution-reconciliations",
+        "top-level execution_reconciliations must match execution_lease_reconciled journal events",
+    )
     projected_model_route_decisions = [
         record.get("event", {}).get("decision")
         for record in bundle.get("journal", [])
