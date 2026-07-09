@@ -5,7 +5,7 @@ validator plus a runner over the fixtures in `spec/examples`.
 
 ## Why not use an off-the-shelf validator?
 
-The conformance suite is the shared source of truth for every beaterOS
+The conformance suite is the shared source of truth for every tempOS
 implementation and must run anywhere with zero setup: a stock Python 3, no
 `pip install`, no network. A full JSON Schema library would be a dependency and
 a supply-chain surface for a repo whose entire thesis is trustworthy tooling.

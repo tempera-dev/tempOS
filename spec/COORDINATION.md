@@ -1,6 +1,6 @@
 # Cross-agent coordination (spec slice)
 
-Several agents are building beaterOS in parallel on the same repo. This file is
+Several agents are building tempOS in parallel on the same repo. This file is
 the coordination record for the **contract spec slice** and how it stays out of
 everyone else's way. It complements — and does not replace —
 `docs/implementation-backlog.md` (introduced by the Rust core PR), which owns the

@@ -1,14 +1,14 @@
-# beaterOS Contract Spec (`spec/`)
+# tempOS Contract Spec (`spec/`)
 
 Spec version: **0.1.0** (see [`VERSION`](VERSION)).
 
-This directory is the **language-neutral source of truth** for the beaterOS core
+This directory is the **language-neutral source of truth** for the tempOS core
 data contracts described in [`final.md`](../final.md) sections **7 ("What Agents
 Should Have In An OS")** and **12 ("Core Data Contracts")**.
 
 `final.md` describes these contracts in prose. The Rust crate
 `crates/beater-os-core` implements them for one runtime. This directory closes
-the gap between the two: it defines the **on-the-wire JSON shape** every beaterOS
+the gap between the two: it defines the **on-the-wire JSON shape** every tempOS
 implementation must agree on, as machine-checkable [JSON Schema](https://json-schema.org)
 (draft 2020-12) plus a runnable conformance suite. Any implementation in any
 language — the Rust kernel today, a TypeScript UI or Python eval harness later —

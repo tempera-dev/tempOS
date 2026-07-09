@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""beaterOS contract conformance runner.
+"""tempOS contract conformance runner.
 
 This is a dependency-free JSON Schema (draft 2020-12 subset) validator plus a
-conformance runner for the beaterOS core data contracts under spec/contracts.
+conformance runner for the tempOS core data contracts under spec/contracts.
 
 Why dependency-free: the conformance suite is the shared, language-neutral
-source of truth for every beaterOS implementation (Rust today, others later).
+source of truth for every tempOS implementation (Rust today, others later).
 It must run in CI and on any contributor's machine with only a stock Python 3,
 no network and no pip install.
 
@@ -51,7 +51,7 @@ class SchemaError(Exception):
 
 
 class Validator:
-    """A small JSON Schema validator covering exactly the keywords the beaterOS
+    """A small JSON Schema validator covering exactly the keywords the tempOS
     contract schemas use. It is deliberately strict and explicit rather than a
     general-purpose implementation, so failures are easy to read and the code is
     easy for any reviewer to audit."""
