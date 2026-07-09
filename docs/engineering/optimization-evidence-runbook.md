@@ -51,7 +51,7 @@ Docs-only PRs can mark the optimization packet `N/A`.
 
 ## Language Boundary Review
 
-The default implementation language for beaterOS authority and hot control-plane
+The default implementation language for tempOS authority and hot control-plane
 work is Rust. A different language is acceptable only when the boundary is the
 reason:
 
@@ -64,7 +64,7 @@ reason:
 | Swift | Apple-native UI or platform integration | Rust authority boundary remains authoritative |
 | TypeScript | Tempo/browser UI, dashboards, agent ergonomics | Generated contracts and native policy/journal/receipt termination |
 | Python | Bounded validation, audit, research, and reproducibility scripts | No ambient authority, bounded runtime, deterministic fixtures |
-| CUDA/Metal/XLA/shaders | Accelerator kernel or backend behind beaterOS contracts | Admission, queue bounds, memory budget, cancellation, telemetry, fallback, receipts |
+| CUDA/Metal/XLA/shaders | Accelerator kernel or backend behind tempOS contracts | Admission, queue bounds, memory budget, cancellation, telemetry, fallback, receipts |
 
 If the tradeoff is close, choose Rust.
 
@@ -94,7 +94,7 @@ An accelerator PR records:
 - receipts proving placement, backend version, partition/slice identity where
   available, input/output digests, observed side effects, and replay evidence
 
-Do not make a vendor SDK the beaterOS contract. Vendor APIs implement the
+Do not make a vendor SDK the tempOS contract. Vendor APIs implement the
 contract; they do not define authority.
 
 ## Reviewer Questions

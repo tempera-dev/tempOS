@@ -1,6 +1,6 @@
 # Metal OS Blueprint
 
-Status: first-principles architecture blueprint for the tempOS/beaterOS
+Status: first-principles architecture blueprint for the tempOS
 long-horizon operating-system program.
 
 This document is not a promise to skip the hosted runtime. It is the map that
@@ -60,7 +60,7 @@ lower-level move.
 
 The Linux add-on lane is separate from the whole-OS metal lane. It experiments
 with Linux-native primitives when they improve agent workloads without changing
-the beaterOS authority contract:
+the tempOS authority contract:
 
 - `sched_ext` and BPF scheduler experiments for policy-aware scheduling.
 - cgroups, namespaces, seccomp, LSMs, and microVMs for containment.
@@ -102,7 +102,7 @@ Use the best language for the subsystem and boundary:
 - Assembly for boot, register work, context switching, syscall veneers, atomics,
   CPU feature probes, or vetted hardware primitives only.
 - CUDA, Metal, XLA/StableHLO, shader languages, and vendor graph compilers for
-  accelerator backends behind beaterOS admission and receipt contracts.
+  accelerator backends behind tempOS admission and receipt contracts.
 - TypeScript, Swift, Go, and Python only where their platform or iteration
   advantage outweighs their unsuitability for the authority boundary.
 
@@ -114,7 +114,7 @@ performance, rollback, and review evidence.
 
 ## Accelerator Fabric
 
-An accelerator backend is valid only if it implements a portable beaterOS job
+An accelerator backend is valid only if it implements a portable tempOS job
 shape before calling a vendor API:
 
 - device class, backend, driver/framework/compiler version, and target features,
