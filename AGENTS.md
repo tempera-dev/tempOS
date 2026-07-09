@@ -6,8 +6,8 @@ other coding agents working in this repository.
 ## What tempOS Is
 
 tempOS is an agent-first operating-system research and implementation repo.
-Current repo/path: `jadenfix/tempOS` and local path `beaterOS`; migrate package/binary
-naming explicitly when the Tempera rename work starts.
+Current canonical repo: `tempera-dev/tempOS`; local package/binary names still
+use `beaterOS` until the Tempera rename work migrates them explicitly.
 The source-of-truth product plan is [final.md](final.md). Implementation must
 turn that plan into reviewed, measurable, macOS-compatible slices without
 shortening or weakening the plan.
@@ -196,7 +196,7 @@ Delete each item only after it is fully migrated and verified in this repo.
 - [ ] Migrate user-facing product naming from beaterOS to tempOS across docs,
   packages, binaries, fixtures, and generated clients. Keep the local checkout
   path stable until an explicit filesystem rename is requested.
-- [ ] Update local git remotes from `jadenfix/beaterOS` to `jadenfix/tempOS`
+- [x] Update local git remotes from `jadenfix/tempOS` to `tempera-dev/tempOS`
   where checkouts still use the old remote.
 - [ ] Verification before deleting this queue: `cargo fmt --all -- --check`,
   `cargo clippy --workspace --all-targets --locked -- -D warnings`,
