@@ -1,4 +1,4 @@
-# beaterOS Review Checklist
+# tempOS Review Checklist
 
 This is the checklist a **non-authoring reviewer** runs against every
 implementation PR. It turns `final.md` §26 ("What Not To Compromise"), §12
@@ -101,7 +101,7 @@ compiler/runtime, accelerator, scheduler, or close-to-metal value. Mark it
       backpressure fixes were considered.
 - [ ] GPU, TPU, LPU, NPU, Apple Silicon, media-engine, enclave, or ASIC paths
       keep admission, queue bounds, memory/residency budgets, cancellation,
-      telemetry, receipts, and fallback under beaterOS contracts.
+      telemetry, receipts, and fallback under tempOS contracts.
 
 ## Reviewer sign-off block (paste into the PR review)
 
