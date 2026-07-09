@@ -6,6 +6,7 @@ members = [
     "crates/beater-os-sandbox",
     "crates/beater-os-session",
     "crates/beater-os-tool-gateway",
+    "crates/beater-os-mcp",
     "crates/beater-os-runtime",
     "crates/beater-osd",
     "crates/beater-osd-http",
@@ -20,7 +21,7 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.93"
 license = "Apache-2.0"
-repository = "https://github.com/jadenfix/beaterOS"
+repository = "https://github.com/tempera-dev/tempOS"
 
 [workspace.dependencies]
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }

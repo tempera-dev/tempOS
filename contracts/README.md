@@ -35,6 +35,8 @@ they diverge.
 | `performance-trace.schema.json` | Optimization trace evidence envelope | §8, §13 |
 | `accelerator-telemetry.schema.json` | Vendor-neutral accelerator job telemetry | §8, §13 |
 | `worker-preflight-plan.schema.json` | Side-effect-free worker scheduler plan | §4.4, §6.4, §7 |
+| `mcp-local-shell-call.schema.json` | Argument payload for the `tempos.local_shell` MCP stdio tool | §8.6, §13.6, §24 |
+| `mcp-local-shell-result.schema.json` | Structured result payload for the `tempos.local_shell` MCP stdio tool | §8.6, §13.6, §24 |
 
 ## Versioning & provenance
 
