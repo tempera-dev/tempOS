@@ -35,6 +35,7 @@
         "required": ["result"]
       },
       "then": {
+        "required": ["selected"],
         "properties": { "selected": { "$ref": "#/$defs/selection" } }
       }
     },
@@ -44,6 +45,7 @@
         "required": ["result"]
       },
       "then": {
+        "required": ["selected"],
         "properties": { "selected": { "type": "null" } }
       }
     }

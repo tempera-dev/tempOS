@@ -30,7 +30,9 @@ decision hash. The runtime and HTTP boundaries journal compact
 data. The journal record stores hashes of the routed request, trusted catalog,
 selected route metadata, effective session policy, and full decision payload so
 offline audit can compare replay inputs without embedding prompt data, provider
-credentials, or full catalog bodies in the journal. The runtime schema mirror is
+credentials, or full catalog bodies in the journal. The daemon store derives
+those hashes from the typed router inputs at the journal boundary, rather than
+trusting caller-supplied compact evidence fields. The runtime schema mirror is
 [`contracts/schema/model-route-decision.schema.json`](../contracts/schema/model-route-decision.schema.json);
 the HTTP/runtime wrapper contract is
 [`contracts/schema/model-route-runtime.schema.json`](../contracts/schema/model-route-runtime.schema.json).

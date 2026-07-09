@@ -33,6 +33,9 @@ use beater_os_core::{
 use beater_os_memory::{
     MemoryContextRequest, MemoryContextSelection, project as project_memory_journal,
 };
+use beater_os_model_router::{
+    ModelRouteCatalog, ModelRouteDecision, ModelRouteDecisionResult, ModelRouteRequest,
+};
 use beater_os_tool_registry::{
     RegisteredTool, RegistryPolicy, ResolveRequest, TestStatus, ToolRegistry, ToolTrust,
 };
@@ -739,13 +742,14 @@ impl Store {
     pub fn record_model_route_decision(
         &self,
         session_id: &str,
-        decision: ModelRouteDecisionRecord,
+        decision: &ModelRouteDecision,
+        request: &ModelRouteRequest,
+        catalog: &ModelRouteCatalog,
         created_at: DateTime<Utc>,
     ) -> DaemonResult<JournalRecord> {
-        if decision.session_id != session_id {
+        if decision.session_id != session_id || request.session_id != session_id {
             return Err(DaemonError::Refused(format!(
-                "model route decision session_id {} does not match route session {}",
-                decision.session_id, session_id
+                "model route decision/request session_id must match route session {session_id}"
             )));
         }
         self.with_session_lock(session_id, || {
@@ -753,12 +757,6 @@ impl Store {
             let projection = project_journal(session_id, &journal)?;
             ensure_session_running(&projection.session)?;
             let expected_policy_hash = hash_json(&projection.session.model_policy)?;
-            if decision.policy_hash != expected_policy_hash {
-                return Err(DaemonError::Refused(format!(
-                    "model route decision {} policy_hash {} does not match current session policy {}",
-                    decision.decision_id, decision.policy_hash, expected_policy_hash
-                )));
-            }
             let admission_state = admission_state_from_journal(session_id, &journal)?;
             if !admission_state.open_execution_leases.is_empty() {
                 return Err(open_execution_lease_refusal(
@@ -767,8 +765,14 @@ impl Store {
                     "record model route decision",
                 ));
             }
-            let record =
-                journal.append(JournalEvent::ModelRouteDecided { decision }, created_at)?;
+            let decision = model_route_decision_record_from_inputs(
+                decision,
+                request,
+                catalog,
+                expected_policy_hash,
+                created_at,
+            )?;
+            let record = journal.append(JournalEvent::ModelRouteDecided { decision }, created_at)?;
             journal.verify_chain()?;
             self.write_journal_record_unlocked(session_id, &record)?;
             Ok(record)
@@ -2448,6 +2452,50 @@ fn default_runtime_tool_registry() -> ToolRegistry {
         require_signature: false,
         ..Default::default()
     })
+}
+
+fn model_route_decision_record_from_inputs(
+    decision: &ModelRouteDecision,
+    request: &ModelRouteRequest,
+    catalog: &ModelRouteCatalog,
+    policy_hash: HashValue,
+    recorded_at: DateTime<Utc>,
+) -> DaemonResult<ModelRouteDecisionRecord> {
+    let selected_route_hash = decision
+        .selected
+        .as_ref()
+        .and_then(|selection| catalog.get(&selection.route_id))
+        .map(hash_json)
+        .transpose()?;
+    Ok(ModelRouteDecisionRecord {
+        decision_id: decision.decision_id.clone(),
+        session_id: decision.session_id.clone(),
+        result: model_route_decision_result_str(&decision.result).to_string(),
+        selected_route_id: decision
+            .selected
+            .as_ref()
+            .map(|selection| selection.route_id.clone()),
+        selected_route_hash,
+        candidate_route_ids: catalog.iter().map(|route| route.route_id.clone()).collect(),
+        rejected_route_ids: decision
+            .rejected_routes
+            .iter()
+            .map(|rejection| rejection.route_id.clone())
+            .collect(),
+        request_hash: hash_json(request)?,
+        catalog_hash: hash_json(catalog)?,
+        policy_hash,
+        decision_payload_hash: hash_json(decision)?,
+        requested_at: decision.requested_at,
+        recorded_at,
+    })
+}
+
+fn model_route_decision_result_str(result: &ModelRouteDecisionResult) -> &'static str {
+    match result {
+        ModelRouteDecisionResult::Allowed => "allowed",
+        ModelRouteDecisionResult::Denied => "denied",
+    }
 }
 
 struct SessionLock {
