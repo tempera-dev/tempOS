@@ -596,8 +596,9 @@ macOS local lane. Linux `seccomp`/Landlock/cgroups and container/VM lanes
 
 `trace export --session <id>` emits the full core-wire replay artifact for one
 session: session, grants, payment mandates, approvals, simulations, manifests,
-policy decisions, compact model route decisions, memory write records, receipts,
-and journal records. `--bundle-id <id>` overrides the default
+policy decisions, execution lease lifecycle records, compact model route
+decisions, memory write records, receipts, and journal records. `--bundle-id
+<id>` overrides the default
 `<session>:<journal-root-hash>`; `--description <text>` adds an optional human
 note.
 
@@ -624,8 +625,10 @@ projection arrays from that journal, compares them to the exported arrays, and
 verifies the receipt chain from `ReceiptAppended` events. Model route decisions
 are checked as compact journal evidence (`ModelRouteDecided`), not as full route
 catalogs or prompt data. Memory records are checked as every `MemoryWritten`
-event in journal order, not as a deduped latest-memory projection. It is not an
-import, resume, restore, or live replay path.
+event in journal order, not as a deduped latest-memory projection. Execution
+leases, heartbeats, and reconciliations are checked as append-order event
+evidence, not as the current open-lease scheduler view. It is not an import,
+resume, restore, or live replay path.
 
 ## Invariants preserved
 

@@ -9,9 +9,9 @@
 
 use beater_os_core::{
     ActionManifest, AgentSession, ApprovalEvidence, CapabilityGrant, CapabilityReceipt,
-    InMemoryJournal, JournalEvent, JournalRecord, JournalSnapshot, MemoryRecord,
-    ModelRouteDecisionRecord, PaymentMandate, PolicyDecision, ReceiptLedger, SessionStatus,
-    SimulationEvidence,
+    ExecutionLease, ExecutionLeaseHeartbeat, ExecutionLeaseReconciliation, InMemoryJournal,
+    JournalEvent, JournalRecord, JournalSnapshot, MemoryRecord, ModelRouteDecisionRecord,
+    PaymentMandate, PolicyDecision, ReceiptLedger, SessionStatus, SimulationEvidence,
 };
 use serde::{Deserialize, Serialize};
 
@@ -34,6 +34,12 @@ pub struct TraceBundle {
     pub simulations: Vec<SimulationEvidence>,
     pub manifests: Vec<ActionManifest>,
     pub decisions: Vec<PolicyDecision>,
+    #[serde(default)]
+    pub execution_leases: Vec<ExecutionLease>,
+    #[serde(default)]
+    pub execution_lease_heartbeats: Vec<ExecutionLeaseHeartbeat>,
+    #[serde(default)]
+    pub execution_reconciliations: Vec<ExecutionLeaseReconciliation>,
     #[serde(default)]
     pub model_route_decisions: Vec<ModelRouteDecisionRecord>,
     #[serde(default)]
@@ -68,6 +74,9 @@ pub struct TraceBundleVerificationReport {
     pub simulations: usize,
     pub manifests: usize,
     pub decisions: usize,
+    pub execution_leases: usize,
+    pub execution_lease_heartbeats: usize,
+    pub execution_reconciliations: usize,
     pub model_route_decisions: usize,
     pub memory_records: usize,
     pub receipts: usize,
@@ -83,6 +92,9 @@ struct ProjectedTrace {
     simulations: Vec<SimulationEvidence>,
     manifests: Vec<ActionManifest>,
     decisions: Vec<PolicyDecision>,
+    execution_leases: Vec<ExecutionLease>,
+    execution_lease_heartbeats: Vec<ExecutionLeaseHeartbeat>,
+    execution_reconciliations: Vec<ExecutionLeaseReconciliation>,
     model_route_decisions: Vec<ModelRouteDecisionRecord>,
     memory_records: Vec<MemoryRecord>,
     receipts: Vec<CapabilityReceipt>,
@@ -203,6 +215,24 @@ pub fn verify_trace_bundle_with_options(
     );
     push_section_check(
         &mut checks,
+        "execution_leases",
+        &bundle.execution_leases,
+        &projected.execution_leases,
+    );
+    push_section_check(
+        &mut checks,
+        "execution_lease_heartbeats",
+        &bundle.execution_lease_heartbeats,
+        &projected.execution_lease_heartbeats,
+    );
+    push_section_check(
+        &mut checks,
+        "execution_reconciliations",
+        &bundle.execution_reconciliations,
+        &projected.execution_reconciliations,
+    );
+    push_section_check(
+        &mut checks,
         "model_route_decisions",
         &bundle.model_route_decisions,
         &projected.model_route_decisions,
@@ -249,6 +279,9 @@ pub fn verify_trace_bundle_with_options(
         simulations: projected.simulations.len(),
         manifests: projected.manifests.len(),
         decisions: projected.decisions.len(),
+        execution_leases: projected.execution_leases.len(),
+        execution_lease_heartbeats: projected.execution_lease_heartbeats.len(),
+        execution_reconciliations: projected.execution_reconciliations.len(),
         model_route_decisions: projected.model_route_decisions.len(),
         memory_records: projected.memory_records.len(),
         receipts: projected.receipts.len(),
@@ -305,9 +338,17 @@ fn project_trace_from_journal(records: &[JournalRecord]) -> Result<ProjectedTrac
                 projected.manifests.push((**manifest).clone());
             }
             JournalEvent::PolicyDecided { decision } => projected.decisions.push(decision.clone()),
-            JournalEvent::ExecutionLeaseIssued { .. }
-            | JournalEvent::ExecutionLeaseHeartbeated { .. }
-            | JournalEvent::ExecutionLeaseReconciled { .. } => {}
+            JournalEvent::ExecutionLeaseIssued { lease } => {
+                projected.execution_leases.push(lease.clone());
+            }
+            JournalEvent::ExecutionLeaseHeartbeated { heartbeat } => {
+                projected.execution_lease_heartbeats.push(heartbeat.clone());
+            }
+            JournalEvent::ExecutionLeaseReconciled { reconciliation } => {
+                projected
+                    .execution_reconciliations
+                    .push(reconciliation.clone());
+            }
             JournalEvent::ApprovalRecorded { approval } => {
                 projected.approvals.push(approval.clone());
             }
@@ -376,7 +417,9 @@ mod tests {
     use super::*;
     use std::collections::BTreeSet;
 
-    use beater_os_core::{JournalEvent, JournalRecord};
+    use beater_os_core::{
+        CapabilitySelector, ExecutionLeaseResolution, JournalEvent, JournalRecord, ResourceKind,
+    };
     use chrono::{TimeZone, Utc};
 
     fn compact_route_decision() -> ModelRouteDecisionRecord {
@@ -414,6 +457,9 @@ mod tests {
             simulations: Vec::new(),
             manifests: Vec::new(),
             decisions: Vec::new(),
+            execution_leases: Vec::new(),
+            execution_lease_heartbeats: Vec::new(),
+            execution_reconciliations: Vec::new(),
             model_route_decisions: Vec::new(),
             memory_records: Vec::new(),
             receipts: Vec::new(),
@@ -427,6 +473,9 @@ mod tests {
         let json = trace_bundle_to_json(&bundle).unwrap_or_else(|err| err.to_string());
         assert!(json.contains("\"bundle_id\""));
         assert!(json.contains("\"sessions\""));
+        assert!(json.contains("\"execution_leases\""));
+        assert!(json.contains("\"execution_lease_heartbeats\""));
+        assert!(json.contains("\"execution_reconciliations\""));
         assert!(json.contains("\"model_route_decisions\""));
         assert!(json.contains("\"memory_records\""));
         assert!(json.contains("\"journal\""));
@@ -449,6 +498,9 @@ mod tests {
           "journal": []
         }"#;
         let bundle: TraceBundle = serde_json::from_str(json).expect("old bundle shape");
+        assert!(bundle.execution_leases.is_empty());
+        assert!(bundle.execution_lease_heartbeats.is_empty());
+        assert!(bundle.execution_reconciliations.is_empty());
         assert!(bundle.model_route_decisions.is_empty());
         assert!(bundle.memory_records.is_empty());
     }
@@ -531,6 +583,119 @@ mod tests {
                 check.check == "trace_bundle_memory_records" && check.outcome == CheckOutcome::Fail
             }),
             "expected memory record section mismatch, got {report:?}"
+        );
+    }
+
+    fn execution_lease() -> ExecutionLease {
+        ExecutionLease {
+            lease_id: "lease-route".to_string(),
+            session_id: "session-route".to_string(),
+            action_id: "action-route".to_string(),
+            manifest_hash: "8888888888888888888888888888888888888888888888888888888888888888"
+                .to_string(),
+            decision_id: "decision-route".to_string(),
+            tool_id: "tool:route".to_string(),
+            tool_ref: "tool:route@1".to_string(),
+            target: CapabilitySelector {
+                resource_kind: ResourceKind::Tool,
+                resource_id: "tool:route".to_string(),
+            },
+            required_grants: BTreeSet::new(),
+            requested_budget: Default::default(),
+            leased_at: Utc.with_ymd_and_hms(2026, 7, 9, 0, 0, 0).unwrap(),
+            expires_at: Utc.with_ymd_and_hms(2026, 7, 9, 0, 1, 0).unwrap(),
+        }
+    }
+
+    fn execution_lease_heartbeat(lease: &ExecutionLease) -> ExecutionLeaseHeartbeat {
+        ExecutionLeaseHeartbeat {
+            heartbeat_id: "heartbeat-route".to_string(),
+            lease_id: lease.lease_id.clone(),
+            session_id: lease.session_id.clone(),
+            action_id: lease.action_id.clone(),
+            manifest_hash: lease.manifest_hash.clone(),
+            decision_id: lease.decision_id.clone(),
+            previous_expires_at: lease.expires_at,
+            extended_expires_at: Utc.with_ymd_and_hms(2026, 7, 9, 0, 2, 0).unwrap(),
+            observed_by: "worker:route".to_string(),
+            evidence_refs: vec!["worker://route/heartbeat".to_string()],
+            heartbeat_at: Utc.with_ymd_and_hms(2026, 7, 9, 0, 0, 30).unwrap(),
+        }
+    }
+
+    fn execution_reconciliation(lease: &ExecutionLease) -> ExecutionLeaseReconciliation {
+        ExecutionLeaseReconciliation {
+            reconciliation_id: "reconcile-route".to_string(),
+            lease_id: lease.lease_id.clone(),
+            session_id: lease.session_id.clone(),
+            action_id: lease.action_id.clone(),
+            manifest_hash: lease.manifest_hash.clone(),
+            decision_id: lease.decision_id.clone(),
+            resolution: ExecutionLeaseResolution::OutcomeUnknown,
+            reconciled_by: "operator:route".to_string(),
+            reason: "worker lease expired before receipt".to_string(),
+            evidence_refs: vec!["worker://route/dead".to_string()],
+            reconciled_at: Utc.with_ymd_and_hms(2026, 7, 9, 0, 3, 0).unwrap(),
+        }
+    }
+
+    #[test]
+    fn execution_lease_lifecycle_projects_from_journal() {
+        let lease = execution_lease();
+        let heartbeat = execution_lease_heartbeat(&lease);
+        let reconciliation = execution_reconciliation(&lease);
+        let records = vec![
+            JournalRecord {
+                seq: 0,
+                created_at: lease.leased_at,
+                event: JournalEvent::ExecutionLeaseIssued {
+                    lease: lease.clone(),
+                },
+                prev_hash: "0000000000000000000000000000000000000000000000000000000000000000"
+                    .to_string(),
+                hash: "9999999999999999999999999999999999999999999999999999999999999999"
+                    .to_string(),
+            },
+            JournalRecord {
+                seq: 1,
+                created_at: heartbeat.heartbeat_at,
+                event: JournalEvent::ExecutionLeaseHeartbeated {
+                    heartbeat: heartbeat.clone(),
+                },
+                prev_hash: "9999999999999999999999999999999999999999999999999999999999999999"
+                    .to_string(),
+                hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                    .to_string(),
+            },
+            JournalRecord {
+                seq: 2,
+                created_at: reconciliation.reconciled_at,
+                event: JournalEvent::ExecutionLeaseReconciled {
+                    reconciliation: reconciliation.clone(),
+                },
+                prev_hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                    .to_string(),
+                hash: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                    .to_string(),
+            },
+        ];
+        let projected = project_trace_from_journal(&records).expect("project trace");
+        assert_eq!(projected.execution_leases, vec![lease]);
+        assert_eq!(projected.execution_lease_heartbeats, vec![heartbeat]);
+        assert_eq!(projected.execution_reconciliations, vec![reconciliation]);
+    }
+
+    #[test]
+    fn forged_execution_lease_section_fails_verification() {
+        let mut bundle = empty_trace_bundle();
+        bundle.execution_leases.push(execution_lease());
+        let report = verify_trace_bundle(&bundle);
+        assert!(
+            report.checks.iter().any(|check| {
+                check.check == "trace_bundle_execution_leases"
+                    && check.outcome == CheckOutcome::Fail
+            }),
+            "expected execution lease section mismatch, got {report:?}"
         );
     }
 }

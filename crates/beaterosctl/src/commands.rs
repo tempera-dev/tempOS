@@ -1575,6 +1575,35 @@ fn trace_export(store: &Store, args: &ParsedArgs) -> CliResult<String> {
             _ => None,
         })
         .collect();
+    let execution_leases = export
+        .journal
+        .records
+        .iter()
+        .filter_map(|record| match &record.event {
+            JournalEvent::ExecutionLeaseIssued { lease } => Some(lease.clone()),
+            _ => None,
+        })
+        .collect();
+    let execution_lease_heartbeats = export
+        .journal
+        .records
+        .iter()
+        .filter_map(|record| match &record.event {
+            JournalEvent::ExecutionLeaseHeartbeated { heartbeat } => Some(heartbeat.clone()),
+            _ => None,
+        })
+        .collect();
+    let execution_reconciliations = export
+        .journal
+        .records
+        .iter()
+        .filter_map(|record| match &record.event {
+            JournalEvent::ExecutionLeaseReconciled { reconciliation } => {
+                Some(reconciliation.clone())
+            }
+            _ => None,
+        })
+        .collect();
     let bundle = beater_os_audit::TraceBundle {
         bundle_id,
         description,
@@ -1586,6 +1615,9 @@ fn trace_export(store: &Store, args: &ParsedArgs) -> CliResult<String> {
         simulations: export.projection.simulations,
         manifests: export.projection.manifests,
         decisions: export.projection.decisions,
+        execution_leases,
+        execution_lease_heartbeats,
+        execution_reconciliations,
         model_route_decisions: export.projection.model_route_decisions,
         memory_records,
         receipts: export.projection.receipts,

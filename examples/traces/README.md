@@ -4,12 +4,13 @@ Machine-readable, end-to-end trace bundles that make `final.md`'s reproducibilit
 and MVP claims concrete (§2.2, §24). Each `*.trace.json` conforms to
 `contracts/schema/trace-bundle.schema.json` and is checked by the conformance
 gate for schema conformance, hash-linked receipt/journal chains, journal
-causality, independent policy admission of every recorded decision, and
-top-level model-route decision evidence matching `model_route_decided` journal
-events. Memory write evidence is likewise checked against `memory_written`
-journal events in append order. These fixtures do not exercise model routing or
-memory writes yet, so their `model_route_decisions` and `memory_records`
-sections are present and empty.
+causality, independent policy admission of every recorded decision,
+execution-lease lifecycle evidence matching lease journal events, and top-level
+model-route decision evidence matching `model_route_decided` journal events.
+Memory write evidence is likewise checked against `memory_written` journal
+events in append order. These fixtures do not exercise daemon execution leases,
+model routing, or memory writes yet, so their `execution_*`,
+`model_route_decisions`, and `memory_records` sections are present and empty.
 
 ## Bundles
 

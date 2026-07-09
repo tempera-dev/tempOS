@@ -482,6 +482,27 @@ fn trace_export_emits_schema_shaped_live_bundle() {
         1
     );
     assert_eq!(
+        json["execution_leases"]
+            .as_array()
+            .expect("execution_leases array")
+            .len(),
+        0
+    );
+    assert_eq!(
+        json["execution_lease_heartbeats"]
+            .as_array()
+            .expect("execution_lease_heartbeats array")
+            .len(),
+        0
+    );
+    assert_eq!(
+        json["execution_reconciliations"]
+            .as_array()
+            .expect("execution_reconciliations array")
+            .len(),
+        0
+    );
+    assert_eq!(
         json["model_route_decisions"]
             .as_array()
             .expect("model_route_decisions array")
