@@ -51,6 +51,10 @@ the same code path that *produced* it. It re-derives the audit invariants from
 - **Full trace memory evidence** — `verify-trace` compares exported
   `memory_records` against every `MemoryWritten` journal event in append order.
   This is write evidence, not the deduped latest-memory context projection.
+- **Full trace incident evidence** — `verify-trace` compares exported
+  `scenario_evaluations` and `incident_annotations` against their journal
+  events in append order. Incident and scenario payloads may be sensitive and
+  belong only in the full trace/debug artifact.
 
 ## CLI
 

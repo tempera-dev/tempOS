@@ -8,9 +8,13 @@ causality, independent policy admission of every recorded decision,
 execution-lease lifecycle evidence matching lease journal events, and top-level
 model-route decision evidence matching `model_route_decided` journal events.
 Memory write evidence is likewise checked against `memory_written` journal
-events in append order. These fixtures do not exercise daemon execution leases,
-model routing, or memory writes yet, so their `execution_*`,
-`model_route_decisions`, and `memory_records` sections are present and empty.
+events in append order, and scenario/incident evidence is checked against
+`scenario_evaluated` and `incident_annotated` events. These fixtures do not
+exercise daemon execution leases, model routing, memory writes, or scenario
+evaluations yet, so their `execution_*`, `model_route_decisions`,
+`memory_records`, and `scenario_evaluations` sections are present and empty; the
+resilience fixture includes one `incident_annotations` entry for its timeout
+incident.
 
 ## Bundles
 

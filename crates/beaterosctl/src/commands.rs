@@ -1604,6 +1604,34 @@ fn trace_export(store: &Store, args: &ParsedArgs) -> CliResult<String> {
             _ => None,
         })
         .collect();
+    let scenario_evaluations = export
+        .journal
+        .records
+        .iter()
+        .filter_map(|record| match &record.event {
+            JournalEvent::ScenarioEvaluated { scenario, passed } => {
+                Some(beater_os_audit::ScenarioEvaluation {
+                    scenario: scenario.clone(),
+                    passed: *passed,
+                })
+            }
+            _ => None,
+        })
+        .collect();
+    let incident_annotations = export
+        .journal
+        .records
+        .iter()
+        .filter_map(|record| match &record.event {
+            JournalEvent::IncidentAnnotated { incident_id, note } => {
+                Some(beater_os_audit::IncidentAnnotation {
+                    incident_id: incident_id.clone(),
+                    note: note.clone(),
+                })
+            }
+            _ => None,
+        })
+        .collect();
     let bundle = beater_os_audit::TraceBundle {
         bundle_id,
         description,
@@ -1620,6 +1648,8 @@ fn trace_export(store: &Store, args: &ParsedArgs) -> CliResult<String> {
         execution_reconciliations,
         model_route_decisions: export.projection.model_route_decisions,
         memory_records,
+        scenario_evaluations,
+        incident_annotations,
         receipts: export.projection.receipts,
         journal: export.journal.records,
     };

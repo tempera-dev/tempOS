@@ -231,6 +231,8 @@
   "execution_reconciliations": [],
   "model_route_decisions": [],
   "memory_records": [],
+  "scenario_evaluations": [],
+  "incident_annotations": [],
   "receipts": [
     {
       "receipt_id": "rcpt-read",

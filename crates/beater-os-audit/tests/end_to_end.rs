@@ -316,6 +316,8 @@ fn trace_bundle_from_snapshot(snapshot: &JournalSnapshot) -> TraceBundle {
         execution_reconciliations: Vec::new(),
         model_route_decisions: Vec::new(),
         memory_records: Vec::new(),
+        scenario_evaluations: Vec::new(),
+        incident_annotations: Vec::new(),
         receipts: Vec::new(),
         journal: snapshot.records.clone(),
     };
@@ -347,15 +349,28 @@ fn trace_bundle_from_snapshot(snapshot: &JournalSnapshot) -> TraceBundle {
             JournalEvent::MemoryWritten { memory } => {
                 bundle.memory_records.push(memory.clone());
             }
+            JournalEvent::ScenarioEvaluated { scenario, passed } => {
+                bundle
+                    .scenario_evaluations
+                    .push(beater_os_audit::ScenarioEvaluation {
+                        scenario: scenario.clone(),
+                        passed: *passed,
+                    });
+            }
+            JournalEvent::IncidentAnnotated { incident_id, note } => {
+                bundle
+                    .incident_annotations
+                    .push(beater_os_audit::IncidentAnnotation {
+                        incident_id: incident_id.clone(),
+                        note: note.clone(),
+                    });
+            }
             JournalEvent::ApprovalRecorded { approval } => bundle.approvals.push(approval.clone()),
             JournalEvent::SimulationRecorded { simulation } => {
                 bundle.simulations.push(simulation.clone());
             }
             JournalEvent::ReceiptAppended { receipt } => bundle.receipts.push(receipt.clone()),
-            JournalEvent::SessionStatusChanged { .. }
-            | JournalEvent::CapabilityRevoked { .. }
-            | JournalEvent::ScenarioEvaluated { .. }
-            | JournalEvent::IncidentAnnotated { .. } => {}
+            JournalEvent::SessionStatusChanged { .. } | JournalEvent::CapabilityRevoked { .. } => {}
         }
     }
     bundle

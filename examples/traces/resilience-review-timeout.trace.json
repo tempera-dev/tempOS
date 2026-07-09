@@ -97,6 +97,13 @@
   "execution_reconciliations": [],
   "model_route_decisions": [],
   "memory_records": [],
+  "scenario_evaluations": [],
+  "incident_annotations": [
+    {
+      "incident_id": "inc-review-timeout",
+      "note": "Human approval for act-deploy-r42 timed out past the review deadline; action not executed; session failing closed (final.md §14.2, §13.15)."
+    }
+  ],
   "receipts": [],
   "journal": [
     {

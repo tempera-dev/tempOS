@@ -516,6 +516,20 @@ fn trace_export_emits_schema_shaped_live_bundle() {
             .len(),
         0
     );
+    assert_eq!(
+        json["scenario_evaluations"]
+            .as_array()
+            .expect("scenario_evaluations array")
+            .len(),
+        0
+    );
+    assert_eq!(
+        json["incident_annotations"]
+            .as_array()
+            .expect("incident_annotations array")
+            .len(),
+        0
+    );
     assert!(json["journal"].as_array().expect("journal array").len() >= 4);
     assert!(
         json["sessions"][0]["memory_scope"].is_null(),

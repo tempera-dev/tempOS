@@ -174,6 +174,32 @@ def check_trace_bundle(rep: Report, reg, path: Path) -> None:
         f"trace {name} memory-records",
         "top-level memory_records must match memory_written journal events",
     )
+    projected_scenario_evaluations = [
+        {
+            "scenario": record.get("event", {}).get("scenario"),
+            "passed": record.get("event", {}).get("passed"),
+        }
+        for record in bundle.get("journal", [])
+        if record.get("event", {}).get("kind") == "scenario_evaluated"
+    ]
+    rep.check(
+        bundle.get("scenario_evaluations", []) == projected_scenario_evaluations,
+        f"trace {name} scenario-evaluations",
+        "top-level scenario_evaluations must match scenario_evaluated journal events",
+    )
+    projected_incident_annotations = [
+        {
+            "incident_id": record.get("event", {}).get("incident_id"),
+            "note": record.get("event", {}).get("note"),
+        }
+        for record in bundle.get("journal", [])
+        if record.get("event", {}).get("kind") == "incident_annotated"
+    ]
+    rep.check(
+        bundle.get("incident_annotations", []) == projected_incident_annotations,
+        f"trace {name} incident-annotations",
+        "top-level incident_annotations must match incident_annotated journal events",
+    )
 
     # Independent admission: each decision must match a re-derived admit().
     decisions = bundle.get("decisions", [])
