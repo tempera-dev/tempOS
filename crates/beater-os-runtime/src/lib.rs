@@ -28,13 +28,13 @@ use beater_os_core::{
     ActionKind, ActionManifest, AgentSession, BeaterOsError, Budget, CapabilityGrant,
     CapabilityReceipt, CapabilityReceiptInput, CapabilityScope, CapabilitySelector, DataClass,
     DecisionResult, DelegationMode, ExecutionLeaseReconciliation, ExecutionLeaseResolution,
-    GrantConstraints, HashValue, ModelPolicy, ModelRouteDecisionRecord, ResourceKind, RiskClass,
-    SessionStatus, SideEffectClass, TaintLabel, hash_json,
+    GrantConstraints, HashValue, ModelPolicy, ResourceKind, RiskClass, SessionStatus,
+    SideEffectClass, TaintLabel, hash_json,
 };
 use beater_os_memory::{MemoryContextRequest, MemoryContextSelection};
 use beater_os_model_router::{
-    ModelRoute, ModelRouteCatalog, ModelRouteDecision, ModelRouteDecisionResult, ModelRouteRequest,
-    ModelRouterError, choose_model_route_at,
+    ModelRoute, ModelRouteCatalog, ModelRouteDecision, ModelRouteRequest, ModelRouterError,
+    choose_model_route_at,
 };
 use beater_os_sandbox::{SandboxLimits, safe_path_environment};
 use beater_os_tool_gateway::{
@@ -295,8 +295,6 @@ impl AgentRuntime {
             });
         }
         let catalog = ModelRouteCatalog::new(routes)?;
-        let candidate_route_ids: BTreeSet<String> =
-            catalog.iter().map(|route| route.route_id.clone()).collect();
         let decision = choose_model_route_at(
             &catalog,
             &projection.session.model_policy,
@@ -304,37 +302,11 @@ impl AgentRuntime {
             Utc::now(),
         )?;
         let recorded_at = Utc::now();
-        let selected_route_hash = decision
-            .selected
-            .as_ref()
-            .and_then(|selection| catalog.get(&selection.route_id))
-            .map(hash_json)
-            .transpose()?;
-        let decision_record = ModelRouteDecisionRecord {
-            decision_id: decision.decision_id.clone(),
-            session_id: decision.session_id.clone(),
-            result: model_route_decision_result_str(&decision.result).to_string(),
-            selected_route_id: decision
-                .selected
-                .as_ref()
-                .map(|selection| selection.route_id.clone()),
-            selected_route_hash,
-            candidate_route_ids,
-            rejected_route_ids: decision
-                .rejected_routes
-                .iter()
-                .map(|rejection| rejection.route_id.clone())
-                .collect(),
-            request_hash: hash_json(&request)?,
-            catalog_hash: hash_json(&catalog)?,
-            policy_hash: hash_json(&projection.session.model_policy)?,
-            decision_payload_hash: hash_json(&decision)?,
-            requested_at: decision.requested_at,
-            recorded_at,
-        };
         let journal_record = self.store.record_model_route_decision(
             &decision.session_id,
-            decision_record,
+            &decision,
+            &request,
+            &catalog,
             recorded_at,
         )?;
         let updated_projection = self.store.project(&decision.session_id)?;
@@ -1442,13 +1414,6 @@ pub struct RuntimeBundle {
     /// admission.
     #[serde(default)]
     pub steps: Vec<RuntimeStep>,
-}
-
-fn model_route_decision_result_str(result: &ModelRouteDecisionResult) -> &'static str {
-    match result {
-        ModelRouteDecisionResult::Allowed => "allowed",
-        ModelRouteDecisionResult::Denied => "denied",
-    }
 }
 
 /// Serializable result of running a hosted-runtime work bundle.

@@ -218,6 +218,7 @@
             "required": ["result"]
           },
           "then": {
+            "required": ["selected_route_id", "selected_route_hash"],
             "properties": {
               "selected_route_id": { "type": "string", "minLength": 1 },
               "selected_route_hash": {
@@ -232,6 +233,7 @@
             "required": ["result"]
           },
           "then": {
+            "required": ["selected_route_id", "selected_route_hash"],
             "properties": {
               "selected_route_id": { "type": "null" },
               "selected_route_hash": { "type": "null" }

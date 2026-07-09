@@ -2,8 +2,8 @@
 
 Supports exactly the subset used by `contracts/schema/*.json` (a pragmatic slice
 of JSON Schema draft 2020-12): type, properties, required, additionalProperties,
-enum, const, items, oneOf, allOf, $ref (intra- and cross-file), minimum,
-maximum, minItems, minLength, pattern, and format: date-time.
+enum, const, items, oneOf, allOf, if/then/else, $ref (intra- and cross-file),
+minimum, maximum, minItems, minLength, pattern, and format: date-time.
 
 Kept minimal on purpose: a full validator is a large dependency, and the schemas
 here are authored to stay within this subset. If a schema uses a keyword this
@@ -25,8 +25,9 @@ _DATE_TIME = re.compile(
 _SUPPORTED = {
     "$schema", "$id", "$defs", "$ref", "title", "description", "type",
     "properties", "required", "additionalProperties", "enum", "const",
-    "items", "oneOf", "allOf", "minimum", "maximum", "minItems", "minLength",
-    "pattern", "format", "uniqueItems", "examples", "default",
+    "items", "oneOf", "allOf", "if", "then", "else", "minimum", "maximum",
+    "minItems", "minLength", "pattern", "format", "uniqueItems", "examples",
+    "default",
 }
 
 
@@ -78,6 +79,14 @@ def _validate(inst, schema, cur_file, reg, path, errors) -> None:
     if "allOf" in schema:
         for sub in schema["allOf"]:
             _validate(inst, sub, cur_file, reg, path, errors)
+
+    if "if" in schema:
+        condition_errors: list[str] = []
+        _validate(inst, schema["if"], cur_file, reg, path, condition_errors)
+        if not condition_errors and "then" in schema:
+            _validate(inst, schema["then"], cur_file, reg, path, errors)
+        elif condition_errors and "else" in schema:
+            _validate(inst, schema["else"], cur_file, reg, path, errors)
 
     if "oneOf" in schema:
         matches = 0

@@ -10,6 +10,7 @@ description = "Durable single-writer runtime store for the beaterOS local daemon
 [dependencies]
 beater-os-core = { path = "../beater-os-core" }
 beater-os-memory = { path = "../beater-os-memory" }
+beater-os-model-router = { path = "../beater-os-model-router" }
 beater-os-tool-registry = { path = "../beater-os-tool-registry" }
 chrono.workspace = true
 serde.workspace = true
