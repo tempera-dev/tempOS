@@ -140,6 +140,17 @@ fn summarize_event(event: &JournalEvent) -> String {
             "approval={} action={} grant={} reviewer={}",
             approval.review_id, approval.action_id, approval.grant_id, approval.reviewer_id
         ),
+        JournalEvent::HumanReviewRequested { request } => format!(
+            "review_request={} action={} reviewers={} preview={}",
+            request.review_id,
+            request.action_id,
+            request.reviewer_ids.len(),
+            request.preview_ref
+        ),
+        JournalEvent::ApprovalDenied { denial } => format!(
+            "approval_denial={} action={} reviewer={} reason={:?}",
+            denial.review_id, denial.action_id, denial.reviewer_id, denial.reason
+        ),
         JournalEvent::SimulationRecorded { simulation } => format!(
             "simulation={} action={} scenario={}",
             simulation.simulation_id, simulation.action_id, simulation.scenario_id

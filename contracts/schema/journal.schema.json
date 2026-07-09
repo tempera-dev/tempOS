@@ -81,6 +81,14 @@
         },
         {
           "additionalProperties": false,
+          "required": ["kind", "request"],
+          "properties": {
+            "kind": { "const": "human_review_requested" },
+            "request": { "$ref": "common.schema.json#/$defs/human_review_request" }
+          }
+        },
+        {
+          "additionalProperties": false,
           "required": ["kind", "lease"],
           "properties": {
             "kind": { "const": "execution_lease_issued" },
@@ -109,6 +117,14 @@
           "properties": {
             "kind": { "const": "approval_recorded" },
             "approval": { "$ref": "common.schema.json#/$defs/approval_evidence" }
+          }
+        },
+        {
+          "additionalProperties": false,
+          "required": ["kind", "denial"],
+          "properties": {
+            "kind": { "const": "approval_denied" },
+            "denial": { "$ref": "common.schema.json#/$defs/approval_denial_evidence" }
           }
         },
         {

@@ -1092,7 +1092,9 @@ fn primary_event_id(record: &JournalRecord) -> Option<&str> {
         JournalEvent::ExecutionLeaseReconciled { reconciliation } => {
             Some(reconciliation.reconciliation_id.as_str())
         }
+        JournalEvent::HumanReviewRequested { request } => Some(request.review_id.as_str()),
         JournalEvent::ApprovalRecorded { approval } => Some(approval.review_id.as_str()),
+        JournalEvent::ApprovalDenied { denial } => Some(denial.review_id.as_str()),
         JournalEvent::SimulationRecorded { simulation } => Some(simulation.simulation_id.as_str()),
         JournalEvent::ReceiptAppended { receipt } => Some(receipt.receipt_id.as_str()),
         // Memory ids are mutable projection keys: the memory projection allows

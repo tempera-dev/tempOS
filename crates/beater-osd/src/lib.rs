@@ -22,12 +22,13 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use beater_os_core::{
-    ActionKind, ActionManifest, AdmissionContext, AgentSession, ApprovalEvidence, Budget,
-    CapabilityGrant, CapabilityReceipt, CapabilityReceiptInput, CapabilityScope, DecisionResult,
-    DelegationMode, ExecutionLease, ExecutionLeaseHeartbeat, ExecutionLeaseReconciliation,
-    HashValue, InMemoryJournal, JournalEvent, JournalRecord, JournalSnapshot, PaymentMandate,
-    PolicyDecision, PolicyEngine, ReceiptLedger, ResourceKind, RiskClass, SessionStatus,
-    SideEffectClass, SimulationEvidence, ToolManifest,
+    ActionKind, ActionManifest, AdmissionContext, AgentSession, ApprovalDenialEvidence,
+    ApprovalEvidence, ApprovalMode, Budget, CapabilityGrant, CapabilityReceipt,
+    CapabilityReceiptInput, CapabilityScope, DecisionResult, DelegationMode, ExecutionLease,
+    ExecutionLeaseHeartbeat, ExecutionLeaseReconciliation, HashValue, HumanReviewRequest,
+    InMemoryJournal, JournalEvent, JournalRecord, JournalSnapshot, PaymentMandate, PolicyDecision,
+    PolicyEngine, ReceiptLedger, ResourceKind, RiskClass, SessionStatus, SideEffectClass,
+    SimulationEvidence, ToolManifest,
 };
 use beater_os_tool_registry::{
     RegisteredTool, RegistryPolicy, ResolveRequest, TestStatus, ToolRegistry, ToolTrust,
@@ -161,9 +162,30 @@ pub struct SessionProjection {
     pub execution_leases: Vec<ExecutionLease>,
     pub execution_lease_heartbeats: Vec<ExecutionLeaseHeartbeat>,
     pub execution_reconciliations: Vec<ExecutionLeaseReconciliation>,
+    pub human_review_requests: Vec<HumanReviewRequest>,
     pub approvals: Vec<ApprovalEvidence>,
+    pub approval_denials: Vec<ApprovalDenialEvidence>,
     pub simulations: Vec<SimulationEvidence>,
     pub receipts: Vec<CapabilityReceipt>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct HumanReviewQueueItem {
+    pub review_id: String,
+    pub session_id: String,
+    pub action_id: String,
+    pub manifest_hash: HashValue,
+    pub decision_id: String,
+    pub required_review: Option<String>,
+    pub required_grants: BTreeSet<String>,
+    pub risk_class: RiskClass,
+    pub reviewer_ids: Vec<String>,
+    pub approved_reviewer_ids: Vec<String>,
+    pub remaining_reviewer_ids: Vec<String>,
+    pub preview_ref: String,
+    pub proposed_at: DateTime<Utc>,
+    pub decided_at: DateTime<Utc>,
+    pub requested_at: DateTime<Utc>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -693,9 +715,19 @@ impl Store {
                     "PolicyDecided must be written through admit_action".to_string(),
                 ));
             }
+            JournalEvent::HumanReviewRequested { .. } => {
+                return Err(DaemonError::Refused(
+                    "HumanReviewRequested must be written through admit_action".to_string(),
+                ));
+            }
             JournalEvent::ApprovalRecorded { .. } => {
                 return Err(DaemonError::Refused(
                     "ApprovalRecorded must be written through record_approval".to_string(),
+                ));
+            }
+            JournalEvent::ApprovalDenied { .. } => {
+                return Err(DaemonError::Refused(
+                    "ApprovalDenied must be written through record_approval_denial".to_string(),
                 ));
             }
             JournalEvent::SimulationRecorded { .. } => {
@@ -707,6 +739,18 @@ impl Store {
         }
         self.with_session_lock(session_id, || {
             self.append_event_unlocked(session_id, event, created_at)
+        })
+    }
+
+    /// Return live human review requests that still block action admission.
+    pub fn pending_human_reviews(
+        &self,
+        session_id: &str,
+    ) -> DaemonResult<Vec<HumanReviewQueueItem>> {
+        self.with_session_lock(session_id, || {
+            let journal = self.load_journal_unlocked(session_id)?;
+            let projection = project_journal(session_id, &journal)?;
+            Ok(project_pending_human_reviews(&projection))
         })
     }
 
@@ -723,6 +767,25 @@ impl Store {
             ensure_session_running(&admission_state.session)?;
             validate_approval_evidence(&admission_state, &approval)?;
             let record = journal.append(JournalEvent::ApprovalRecorded { approval }, created_at)?;
+            journal.verify_chain()?;
+            self.write_journal_record_unlocked(session_id, &record)?;
+            Ok(record)
+        })
+    }
+
+    /// Record action-bound human denial evidence through the daemon boundary.
+    pub fn record_approval_denial(
+        &self,
+        session_id: &str,
+        denial: ApprovalDenialEvidence,
+        created_at: DateTime<Utc>,
+    ) -> DaemonResult<JournalRecord> {
+        self.with_session_lock(session_id, || {
+            let mut journal = self.load_journal_unlocked(session_id)?;
+            let admission_state = admission_state_from_journal(session_id, &journal)?;
+            ensure_session_running(&admission_state.session)?;
+            validate_approval_denial_evidence(&admission_state, &denial)?;
+            let record = journal.append(JournalEvent::ApprovalDenied { denial }, created_at)?;
             journal.verify_chain()?;
             self.write_journal_record_unlocked(session_id, &record)?;
             Ok(record)
@@ -1064,8 +1127,22 @@ impl Store {
                     manifest.action_id
                 )));
             }
+            let manifest_hash = manifest.digest()?;
+            if admission_state.approval_denials.iter().any(|denial| {
+                denial.action_id == manifest.action_id && denial.manifest_hash == manifest_hash
+            }) {
+                return Err(DaemonError::Refused(format!(
+                    "action {} has a recorded human review denial and cannot be re-admitted",
+                    manifest.action_id
+                )));
+            }
 
             let now = Utc::now();
+            let review_manifest = manifest.clone();
+            let existing_review_request = admission_state
+                .human_review_requests
+                .get(manifest.action_id.as_str())
+                .cloned();
             let payment_reserved_by_mandate = payment_reserved_by_mandate_excluding(
                 &admission_state,
                 manifest.action_id.as_str(),
@@ -1111,6 +1188,33 @@ impl Store {
                 now,
             )?;
             records_to_write.push(decision_record.clone());
+            if decision.result == DecisionResult::NeedsApproval && existing_review_request.is_none()
+            {
+                let review_request = HumanReviewRequest {
+                    review_id: format!("review-{}", decision.decision_id),
+                    session_id: decision.session_id.clone(),
+                    action_id: decision.action_id.clone(),
+                    manifest_hash: decision.manifest_hash.clone(),
+                    required_review: decision.required_review.clone(),
+                    required_grants: review_manifest.required_grants.clone(),
+                    reviewer_ids: reviewer_ids_for_manifest(
+                        &review_manifest,
+                        &ctx.grants,
+                        decision.required_review.as_deref(),
+                    ),
+                    risk_class: review_manifest.risk_class.clone(),
+                    preview_ref: format!("manifest:{}", decision.manifest_hash),
+                    policy_version: decision.policy_version.clone(),
+                    created_at: now,
+                };
+                let review_record = journal.append(
+                    JournalEvent::HumanReviewRequested {
+                        request: review_request,
+                    },
+                    now,
+                )?;
+                records_to_write.push(review_record);
+            }
             journal.verify_chain()?;
             let receipt_root_hash = self
                 .receipt_ledger_from_journal_unlocked(session_id)?
@@ -2207,7 +2311,9 @@ fn project_journal(session_id: &str, journal: &InMemoryJournal) -> DaemonResult<
     let mut execution_leases = Vec::new();
     let mut execution_lease_heartbeats = Vec::new();
     let mut execution_reconciliations = Vec::new();
+    let mut human_review_requests = Vec::new();
     let mut approvals = Vec::new();
+    let mut approval_denials = Vec::new();
     let mut simulations = Vec::new();
     let mut receipts = Vec::new();
     for record in journal.records() {
@@ -2268,7 +2374,11 @@ fn project_journal(session_id: &str, journal: &InMemoryJournal) -> DaemonResult<
             JournalEvent::ExecutionLeaseReconciled { reconciliation } => {
                 execution_reconciliations.push(reconciliation.clone());
             }
+            JournalEvent::HumanReviewRequested { request } => {
+                human_review_requests.push(request.clone());
+            }
             JournalEvent::ApprovalRecorded { approval } => approvals.push(approval.clone()),
+            JournalEvent::ApprovalDenied { denial } => approval_denials.push(denial.clone()),
             JournalEvent::SimulationRecorded { simulation } => simulations.push(simulation.clone()),
             JournalEvent::ReceiptAppended { receipt } => receipts.push(receipt.clone()),
             JournalEvent::MemoryWritten { .. }
@@ -2291,9 +2401,200 @@ fn project_journal(session_id: &str, journal: &InMemoryJournal) -> DaemonResult<
         execution_leases,
         execution_lease_heartbeats,
         execution_reconciliations,
+        human_review_requests,
         approvals,
+        approval_denials,
         simulations,
         receipts,
+    })
+}
+
+fn project_pending_human_reviews(projection: &SessionProjection) -> Vec<HumanReviewQueueItem> {
+    let grants_by_id: BTreeMap<&str, &CapabilityGrant> = projection
+        .grants
+        .iter()
+        .map(|grant| (grant.grant_id.as_str(), grant))
+        .collect();
+    let proposals_by_id: BTreeMap<&str, &ActionManifest> = projection
+        .manifests
+        .iter()
+        .map(|manifest| (manifest.action_id.as_str(), manifest))
+        .collect();
+    let latest_decisions: BTreeMap<&str, &PolicyDecision> = projection
+        .decisions
+        .iter()
+        .map(|decision| (decision.action_id.as_str(), decision))
+        .collect();
+    let denied_actions: BTreeSet<(&str, &HashValue)> = projection
+        .approval_denials
+        .iter()
+        .map(|denial| (denial.action_id.as_str(), &denial.manifest_hash))
+        .collect();
+    let closed_actions = projection.closed_execution_actions();
+
+    projection
+        .human_review_requests
+        .iter()
+        .filter_map(|request| {
+            if closed_actions.contains(request.action_id.as_str())
+                || denied_actions.contains(&(request.action_id.as_str(), &request.manifest_hash))
+            {
+                return None;
+            }
+            let decision = latest_decisions.get(request.action_id.as_str())?;
+            if decision.result != DecisionResult::NeedsApproval
+                || decision.manifest_hash != request.manifest_hash
+            {
+                return None;
+            }
+            let manifest = proposals_by_id.get(request.action_id.as_str())?;
+            let approved_reviewer_ids =
+                approved_reviewers_for_request(request, &projection.approvals);
+            let remaining_reviewer_ids = remaining_reviewers_for_manifest(
+                manifest,
+                &grants_by_id,
+                &projection.approvals,
+                &request.manifest_hash,
+                request.required_review.as_deref(),
+            );
+            if !request.reviewer_ids.is_empty() && remaining_reviewer_ids.is_empty() {
+                return None;
+            }
+            Some(HumanReviewQueueItem {
+                review_id: request.review_id.clone(),
+                session_id: request.session_id.clone(),
+                action_id: request.action_id.clone(),
+                manifest_hash: request.manifest_hash.clone(),
+                decision_id: decision.decision_id.clone(),
+                required_review: request.required_review.clone(),
+                required_grants: request.required_grants.clone(),
+                risk_class: request.risk_class.clone(),
+                reviewer_ids: request.reviewer_ids.clone(),
+                approved_reviewer_ids,
+                remaining_reviewer_ids,
+                preview_ref: request.preview_ref.clone(),
+                proposed_at: request.created_at,
+                decided_at: decision.decided_at,
+                requested_at: request.created_at,
+            })
+        })
+        .collect()
+}
+
+fn reviewer_ids_for_manifest(
+    manifest: &ActionManifest,
+    grants: &[CapabilityGrant],
+    required_review: Option<&str>,
+) -> Vec<String> {
+    let grants_by_id: BTreeMap<&str, &CapabilityGrant> = grants
+        .iter()
+        .map(|grant| (grant.grant_id.as_str(), grant))
+        .collect();
+    let mut reviewer_ids = BTreeSet::new();
+    for grant_id in &manifest.required_grants {
+        let Some(grant) = grants_by_id.get(grant_id.as_str()) else {
+            continue;
+        };
+        if review_requires_grant(manifest, grant, required_review) {
+            reviewer_ids.extend(grant.approval.reviewer_ids.iter().cloned());
+        }
+    }
+    reviewer_ids.into_iter().collect()
+}
+
+fn approved_reviewers_for_request(
+    request: &HumanReviewRequest,
+    approvals: &[ApprovalEvidence],
+) -> Vec<String> {
+    approvals
+        .iter()
+        .filter(|approval| {
+            approval.action_id == request.action_id
+                && approval.manifest_hash == request.manifest_hash
+                && approval.policy_version == request.policy_version
+        })
+        .map(|approval| approval.reviewer_id.clone())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+fn remaining_reviewers_for_manifest(
+    manifest: &ActionManifest,
+    grants_by_id: &BTreeMap<&str, &CapabilityGrant>,
+    approvals: &[ApprovalEvidence],
+    manifest_hash: &HashValue,
+    required_review: Option<&str>,
+) -> Vec<String> {
+    let mut remaining = BTreeSet::new();
+    for grant_id in &manifest.required_grants {
+        let Some(grant) = grants_by_id.get(grant_id.as_str()) else {
+            continue;
+        };
+        if !review_requires_grant(manifest, grant, required_review) {
+            continue;
+        }
+        match grant.approval.mode {
+            ApprovalMode::None => {}
+            ApprovalMode::Human => {
+                let has_approval = grant.approval.reviewer_ids.iter().any(|reviewer_id| {
+                    has_approval_from_reviewer_id(
+                        approvals,
+                        manifest,
+                        manifest_hash,
+                        &grant.grant_id,
+                        reviewer_id,
+                    )
+                });
+                if !has_approval {
+                    remaining.extend(grant.approval.reviewer_ids.iter().cloned());
+                }
+            }
+            ApprovalMode::MultiParty => {
+                for reviewer_id in &grant.approval.reviewer_ids {
+                    if !has_approval_from_reviewer_id(
+                        approvals,
+                        manifest,
+                        manifest_hash,
+                        &grant.grant_id,
+                        reviewer_id,
+                    ) {
+                        remaining.insert(reviewer_id.clone());
+                    }
+                }
+            }
+        }
+    }
+    remaining.into_iter().collect()
+}
+
+fn review_requires_grant(
+    manifest: &ActionManifest,
+    grant: &CapabilityGrant,
+    required_review: Option<&str>,
+) -> bool {
+    if grant.approval.mode == ApprovalMode::None {
+        return false;
+    }
+    if matches!(required_review, Some(review) if review.contains(":grant-threshold-review")) {
+        return manifest.risk_class >= grant.approval.threshold_risk;
+    }
+    true
+}
+
+fn has_approval_from_reviewer_id(
+    approvals: &[ApprovalEvidence],
+    manifest: &ActionManifest,
+    manifest_hash: &HashValue,
+    grant_id: &str,
+    reviewer_id: &str,
+) -> bool {
+    approvals.iter().any(|approval| {
+        approval.action_id == manifest.action_id
+            && approval.manifest_hash == *manifest_hash
+            && approval.grant_id == grant_id
+            && approval.policy_version == DAEMON_POLICY_VERSION
+            && approval.reviewer_id == reviewer_id
     })
 }
 
@@ -2399,7 +2700,9 @@ struct AdmissionState {
     reconciled_execution_actions: BTreeMap<String, ExecutionLeaseReconciliation>,
     proposals: BTreeMap<String, ProposedAction>,
     latest_decisions: BTreeMap<String, PolicyDecision>,
+    human_review_requests: BTreeMap<String, HumanReviewRequest>,
     approvals: Vec<ApprovalEvidence>,
+    approval_denials: Vec<ApprovalDenialEvidence>,
     simulations: Vec<SimulationEvidence>,
 }
 
@@ -2425,7 +2728,9 @@ fn admission_state_from_journal(
     let mut reconciled_execution_actions = BTreeMap::new();
     let mut proposals = BTreeMap::new();
     let mut latest_decisions = BTreeMap::new();
+    let mut human_review_requests = BTreeMap::new();
     let mut approvals = Vec::new();
+    let mut approval_denials = Vec::new();
     let mut simulations = Vec::new();
     for record in journal.records() {
         match &record.event {
@@ -2501,6 +2806,9 @@ fn admission_state_from_journal(
             JournalEvent::PolicyDecided { decision } => {
                 latest_decisions.insert(decision.action_id.clone(), decision.clone());
             }
+            JournalEvent::HumanReviewRequested { request } => {
+                human_review_requests.insert(request.action_id.clone(), request.clone());
+            }
             JournalEvent::ExecutionLeaseIssued { lease } => {
                 if reconciled_execution_actions.contains_key(&lease.action_id) {
                     return Err(DaemonError::Refused(format!(
@@ -2553,6 +2861,7 @@ fn admission_state_from_journal(
                     .insert(reconciliation.action_id.clone(), reconciliation.clone());
             }
             JournalEvent::ApprovalRecorded { approval } => approvals.push(approval.clone()),
+            JournalEvent::ApprovalDenied { denial } => approval_denials.push(denial.clone()),
             JournalEvent::SimulationRecorded { simulation } => simulations.push(simulation.clone()),
             JournalEvent::ReceiptAppended { receipt } => {
                 receipted_actions.insert(receipt.action_id.clone());
@@ -2638,7 +2947,9 @@ fn admission_state_from_journal(
         reconciled_execution_actions,
         proposals,
         latest_decisions,
+        human_review_requests,
         approvals,
+        approval_denials,
         simulations,
     })
 }
@@ -2813,7 +3124,9 @@ fn journal_event_id(event: &JournalEvent) -> Option<&str> {
         JournalEvent::ExecutionLeaseReconciled { reconciliation } => {
             Some(reconciliation.reconciliation_id.as_str())
         }
+        JournalEvent::HumanReviewRequested { request } => Some(request.review_id.as_str()),
         JournalEvent::ApprovalRecorded { approval } => Some(approval.review_id.as_str()),
+        JournalEvent::ApprovalDenied { denial } => Some(denial.review_id.as_str()),
         JournalEvent::SimulationRecorded { simulation } => Some(simulation.simulation_id.as_str()),
         JournalEvent::ReceiptAppended { receipt } => Some(receipt.receipt_id.as_str()),
         JournalEvent::MemoryWritten { .. } => None,
@@ -2844,16 +3157,170 @@ fn validate_approval_evidence(
             approval.review_id, approval.action_id
         )));
     }
-    if !state.grants.contains_key(&approval.grant_id) {
+    let Some(grant) = state.grants.get(&approval.grant_id) else {
         return Err(DaemonError::Refused(format!(
             "approval {} references unknown grant {}",
             approval.review_id, approval.grant_id
+        )));
+    };
+    if !proposal
+        .manifest
+        .required_grants
+        .contains(&approval.grant_id)
+    {
+        return Err(DaemonError::Refused(format!(
+            "approval {} references grant {} that action {} did not require",
+            approval.review_id, approval.grant_id, approval.action_id
+        )));
+    }
+    if grant.approval.mode == ApprovalMode::None
+        || !grant.approval.reviewer_ids.contains(&approval.reviewer_id)
+    {
+        return Err(DaemonError::Refused(format!(
+            "approval {} reviewer {} is not authorized for grant {}",
+            approval.review_id, approval.reviewer_id, approval.grant_id
+        )));
+    }
+    let Some(decision) = state.latest_decisions.get(&approval.action_id) else {
+        return Err(DaemonError::Refused(format!(
+            "approval {} references action {} without a policy decision",
+            approval.review_id, approval.action_id
+        )));
+    };
+    if decision.result != DecisionResult::NeedsApproval {
+        return Err(DaemonError::Refused(format!(
+            "approval {} references action {} without a latest NeedsApproval decision",
+            approval.review_id, approval.action_id
+        )));
+    }
+    let Some(request) = state.human_review_requests.get(&approval.action_id) else {
+        return Err(DaemonError::Refused(format!(
+            "approval {} references action {} without a pending human review request",
+            approval.review_id, approval.action_id
+        )));
+    };
+    if request.manifest_hash != approval.manifest_hash {
+        return Err(DaemonError::Refused(format!(
+            "approval {} manifest hash does not match review request {}",
+            approval.review_id, request.review_id
+        )));
+    }
+    if !request.reviewer_ids.is_empty() && !request.reviewer_ids.contains(&approval.reviewer_id) {
+        return Err(DaemonError::Refused(format!(
+            "approval {} reviewer {} is not allowed for review request {}",
+            approval.review_id, approval.reviewer_id, request.review_id
+        )));
+    }
+    if state.approval_denials.iter().any(|denial| {
+        denial.action_id == approval.action_id && denial.manifest_hash == approval.manifest_hash
+    }) {
+        return Err(DaemonError::Refused(format!(
+            "approval {} references action {} after a recorded human review denial",
+            approval.review_id, approval.action_id
+        )));
+    }
+    if state.approvals.iter().any(|recorded| {
+        recorded.action_id == approval.action_id
+            && recorded.manifest_hash == approval.manifest_hash
+            && recorded.grant_id == approval.grant_id
+            && recorded.reviewer_id == approval.reviewer_id
+    }) {
+        return Err(DaemonError::Refused(format!(
+            "approval {} duplicates reviewer {} for grant {}",
+            approval.review_id, approval.reviewer_id, approval.grant_id
         )));
     }
     if approval.approved_at < proposal.record.created_at {
         return Err(DaemonError::Refused(format!(
             "approval {} predates action proposal {}",
             approval.review_id, approval.action_id
+        )));
+    }
+    if approval.approved_at < request.created_at {
+        return Err(DaemonError::Refused(format!(
+            "approval {} predates human review request {}",
+            approval.review_id, request.review_id
+        )));
+    }
+    Ok(())
+}
+
+fn validate_approval_denial_evidence(
+    state: &AdmissionState,
+    denial: &ApprovalDenialEvidence,
+) -> DaemonResult<()> {
+    if denial.policy_version != DAEMON_POLICY_VERSION {
+        return Err(DaemonError::Refused(format!(
+            "review denial {} uses unsupported policy version {}",
+            denial.review_id, denial.policy_version
+        )));
+    }
+    if denial.reason.trim().is_empty() {
+        return Err(DaemonError::Refused(format!(
+            "review denial {} has empty reason",
+            denial.review_id
+        )));
+    }
+    let Some(proposal) = state.proposals.get(&denial.action_id) else {
+        return Err(DaemonError::Refused(format!(
+            "review denial {} references unproposed action {}",
+            denial.review_id, denial.action_id
+        )));
+    };
+    if proposal.manifest.digest()? != denial.manifest_hash {
+        return Err(DaemonError::Refused(format!(
+            "review denial {} manifest hash does not match action {}",
+            denial.review_id, denial.action_id
+        )));
+    }
+    let Some(decision) = state.latest_decisions.get(&denial.action_id) else {
+        return Err(DaemonError::Refused(format!(
+            "review denial {} references action {} without a policy decision",
+            denial.review_id, denial.action_id
+        )));
+    };
+    if decision.result != DecisionResult::NeedsApproval {
+        return Err(DaemonError::Refused(format!(
+            "review denial {} references action {} without a latest NeedsApproval decision",
+            denial.review_id, denial.action_id
+        )));
+    }
+    let Some(request) = state.human_review_requests.get(&denial.action_id) else {
+        return Err(DaemonError::Refused(format!(
+            "review denial {} references action {} without a pending human review request",
+            denial.review_id, denial.action_id
+        )));
+    };
+    if request.manifest_hash != denial.manifest_hash {
+        return Err(DaemonError::Refused(format!(
+            "review denial {} manifest hash does not match review request {}",
+            denial.review_id, request.review_id
+        )));
+    }
+    if !request.reviewer_ids.is_empty() && !request.reviewer_ids.contains(&denial.reviewer_id) {
+        return Err(DaemonError::Refused(format!(
+            "review denial {} reviewer {} is not allowed for review request {}",
+            denial.review_id, denial.reviewer_id, request.review_id
+        )));
+    }
+    if state.approval_denials.iter().any(|recorded| {
+        recorded.action_id == denial.action_id && recorded.manifest_hash == denial.manifest_hash
+    }) {
+        return Err(DaemonError::Refused(format!(
+            "action {} already has a recorded human review denial",
+            denial.action_id
+        )));
+    }
+    if denial.denied_at < proposal.record.created_at {
+        return Err(DaemonError::Refused(format!(
+            "review denial {} predates action proposal {}",
+            denial.review_id, denial.action_id
+        )));
+    }
+    if denial.denied_at < request.created_at {
+        return Err(DaemonError::Refused(format!(
+            "review denial {} predates human review request {}",
+            denial.review_id, request.review_id
         )));
     }
     Ok(())
