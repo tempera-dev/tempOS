@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "runtime-execution-heartbeat-request.schema.json",
+  "title": "RuntimeExecutionHeartbeatRequest",
+  "description": "HTTP/runtime request body for renewing one live execution lease through POST /v1/sessions/<session-id>/actions/<action-id>/claims/<lease-id>/heartbeat.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "heartbeat_id",
+    "worker_id",
+    "expected_manifest_hash",
+    "expected_decision_id",
+    "previous_expires_at",
+    "extend_ms"
+  ],
+  "properties": {
+    "heartbeat_id": { "type": "string", "minLength": 1 },
+    "worker_id": { "type": "string", "minLength": 1 },
+    "expected_manifest_hash": { "$ref": "common.schema.json#/$defs/hash_value" },
+    "expected_decision_id": { "type": "string", "minLength": 1 },
+    "previous_expires_at": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "extend_ms": { "type": "integer", "minimum": 1 },
+    "evidence_refs": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    }
+  }
+}

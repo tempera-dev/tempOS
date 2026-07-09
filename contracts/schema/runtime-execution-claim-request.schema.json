@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "runtime-execution-claim-request.schema.json",
+  "title": "RuntimeExecutionClaimRequest",
+  "description": "HTTP/runtime request body for POST /v1/sessions/<session-id>/actions/<action-id>/claims. The path supplies session_id and action_id; the body carries compare-and-set fields only.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "expected_manifest_hash",
+    "expected_decision_id",
+    "expected_tool_version",
+    "expected_tool_digest"
+  ],
+  "properties": {
+    "expected_manifest_hash": { "$ref": "common.schema.json#/$defs/hash_value" },
+    "expected_decision_id": { "type": "string", "minLength": 1 },
+    "expected_tool_version": { "type": "string", "minLength": 1 },
+    "expected_tool_digest": { "$ref": "common.schema.json#/$defs/hash_value" },
+    "lease_id": {
+      "anyOf": [{ "type": "string", "minLength": 1 }, { "type": "null" }],
+      "description": "Optional caller-selected lease id. When omitted, the daemon derives lease-<expected_decision_id>."
+    },
+    "initial_lease_ms": {
+      "anyOf": [{ "type": "integer", "minimum": 1 }, { "type": "null" }],
+      "description": "Optional shorter initial lease duration. The daemon still enforces its upper bound and action budget."
+    }
+  }
+}

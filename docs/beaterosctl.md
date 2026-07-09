@@ -71,9 +71,12 @@ POST /v1/sessions/<session-id>/actions/execute-local-shell-preflight
 ```
 
 The preflight body uses the same local shell recipe fields as the worker loop:
-`tool`, optional `tool_version`, `tool_digest`, `command`, `args`, `cwd`,
-`env`, `side_effects`, `risk`, `timeout_secs`, `max_output_bytes`, and
-`max_actions`. It does not accept lease ids, receipt ids, or recovery fields.
+optional `action_id`, `tool`, optional `tool_version`, `tool_digest`,
+`command`, `args`, `cwd`, `env`, `side_effects`, `risk`, `timeout_secs`,
+`max_output_bytes`, watchdog fields (`initial_lease_ms`,
+`heartbeat_interval_ms`, `heartbeat_extend_ms`, `worker_id`, and
+`heartbeat_evidence_refs`), and `max_actions`. It does not accept lease ids,
+receipt ids, or recovery fields.
 The response follows `contracts/schema/worker-preflight-plan.schema.json` and
 returns one `action`: `wait_live_lease`, `recover_expired_lease`,
 `dispatch_runnable_action`, `idle`, or `no_matching_action`. `dispatch` is only
@@ -687,11 +690,19 @@ For daemon-owned execution, `beater-osd-http serve` is the service-plane control
 binary that sits above the store and the tool gateway. It preserves the same
 loopback, `Host`/`Origin`, and bearer-token boundary, and adds:
 
+- `GET /v1/sessions/<id>`
 - `POST /v1/sessions/<id>/actions/execute-local-shell`
+- `POST /v1/sessions/<id>/actions/execute-local-shell-preflight`
+- `POST /v1/sessions/<id>/actions/execute-local-shell-loop`
+- `GET /v1/sessions/<id>/actions/claimable`
 - `POST /v1/sessions/<id>/actions/<action_id>/approval`
 - `POST /v1/sessions/<id>/model-routes/choose`
+- `POST /v1/sessions/<id>/memory/records`
+- `POST /v1/sessions/<id>/memory/context/select`
 - `POST /v1/sessions/<id>/actions/<action_id>/claims`
+- `POST /v1/sessions/<id>/actions/<action_id>/claims/<lease_id>/heartbeat`
 - `POST /v1/sessions/<id>/actions/<action_id>/claims/<lease_id>/complete`
+- `POST /v1/sessions/<id>/actions/<action_id>/claims/<lease_id>/reconcile`
 - `POST /v1/runtime/bundles`
 
 That route accepts a bounded JSON request (`command`, `cwd`, `grants`, optional
@@ -811,14 +822,27 @@ journal hash when the watchdog was enabled.
 Schedulers that split claim from execution use
 `POST /v1/sessions/<id>/actions/<action_id>/claims`. The request carries only
 compare-and-set fields (`expected_manifest_hash`, `expected_decision_id`, and
-`expected_tool_version`, `expected_tool_digest`, and an optional `lease_id`);
-it does not carry target, grant, or budget authority. The daemon rebuilds the
+`expected_tool_version`, `expected_tool_digest`, an optional `lease_id`, and an
+optional `initial_lease_ms`); it does not carry target, grant, or budget
+authority. The daemon rebuilds the
 latest admitted manifest and policy decision from the journal, resolves the
 pinned tool through the daemon-owned registry, derives the execution lease from
 that state, fsyncs `ExecutionLeaseIssued`, and returns the lease id, manifest
 hash, decision id, pinned `tool_id@version#digest`, target, required grants,
 budget, lease journal sequence/hash, expiration, and journal root hash with
-`201 Created`.
+`201 Created`. The request and response wire shapes are published as
+`contracts/schema/runtime-execution-claim-request.schema.json` and
+`contracts/schema/runtime-execution-claim-response.schema.json`; the claim
+response keeps the compatibility field name `journal_root_hash` for the root
+after the lease append.
+
+Lease renewal uses
+`POST /v1/sessions/<id>/actions/<action_id>/claims/<lease_id>/heartbeat`.
+The body shape is
+`contracts/schema/runtime-execution-heartbeat-request.schema.json`, and the
+response is `contracts/schema/runtime-execution-heartbeat-response.schema.json`.
+The daemon accepts only a still-live open lease whose manifest, decision, and
+current expiry match the request.
 
 Workers complete claimed work with
 `POST /v1/sessions/<id>/actions/<action_id>/claims/<lease_id>/complete` and a
@@ -826,7 +850,18 @@ receipt-shaped body. The receipt `action_id` must match the route action id,
 and the store accepts it only if `<lease_id>` is the exact currently open lease
 for that action. Generic receipt append paths refuse to complete open execution
 leases, so scheduler workers cannot bypass the claim token by posting a receipt
-that only matches the action id.
+that only matches the action id. The body is
+`contracts/schema/runtime-execution-complete-request.schema.json`, a
+`CapabilityReceiptInput` shape before daemon-assigned receipt sequence and
+hashes; the response is
+`contracts/schema/runtime-execution-complete-response.schema.json`.
+
+Expired unresolved leases are closed through
+`POST /v1/sessions/<id>/actions/<action_id>/claims/<lease_id>/reconcile`.
+The only supported resolution is `outcome_unknown`; reconciliation does not
+prove success and does not mint a receipt. The request and response schemas are
+`contracts/schema/runtime-execution-reconcile-request.schema.json` and
+`contracts/schema/runtime-execution-reconcile-response.schema.json`.
 
 For runtime local-shell workers, the claimed execution path snapshots the open
 lease and projection under the daemon session lock, releases that lock while

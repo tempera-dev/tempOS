@@ -34,6 +34,14 @@ they diverge.
 | `runtime-memory-context-outcome.schema.json` | HTTP/runtime memory context response bound to journal root and projection summary | §7.7, §12.6, §13.4 |
 | `runtime-approval-request.schema.json` | HTTP/runtime request for daemon-recorded action-bound approval evidence | §7.9, §12.4, §13.14 |
 | `runtime-approval-response.schema.json` | HTTP/runtime response after an `ApprovalRecorded` event and optional readmission decision append | §7.9, §12.4, §13.14 |
+| `runtime-execution-claim-request.schema.json` | HTTP/runtime compare-and-set request for claiming an admitted action lease | §4.4, §6.4, §7.6 |
+| `runtime-execution-claim-response.schema.json` | HTTP/runtime response after daemon-journaled `ExecutionLeaseIssued` | §4.4, §6.4, §7.6 |
+| `runtime-execution-heartbeat-request.schema.json` | HTTP/runtime request for bounded renewal of one live execution lease | §4.4, §6.4, §7.6 |
+| `runtime-execution-heartbeat-response.schema.json` | HTTP/runtime response after daemon-journaled `ExecutionLeaseHeartbeated` | §4.4, §6.4, §7.6 |
+| `runtime-execution-complete-request.schema.json` | HTTP/runtime receipt-input body for completing the exact open execution lease | §4.4, §6.4, §7.6 |
+| `runtime-execution-complete-response.schema.json` | HTTP/runtime response after lease-bound receipt append | §4.4, §6.4, §7.6 |
+| `runtime-execution-reconcile-request.schema.json` | HTTP/runtime request for closing an expired unresolved lease as `outcome_unknown` | §4.4, §6.4, §7.6 |
+| `runtime-execution-reconcile-response.schema.json` | HTTP/runtime response after daemon-journaled `ExecutionLeaseReconciled` | §4.4, §6.4, §7.6 |
 | `payment-mandate.schema.json` | PaymentMandate runtime mirror; core shape owned by `spec/contracts` | §12.7, §16.1 |
 | `scenario-manifest.schema.json` | ScenarioManifest runtime mirror; core shape owned by `spec/contracts` | §7.10, §12.8 |
 | `journal.schema.json` | JournalRecord + JournalEvent | §4.5, §10.4 |

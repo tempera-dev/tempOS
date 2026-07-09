@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "runtime-execution-heartbeat-response.schema.json",
+  "title": "RuntimeExecutionHeartbeatResponse",
+  "description": "HTTP/runtime response after the daemon appends ExecutionLeaseHeartbeated for an open lease.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "session_id",
+    "action_id",
+    "lease_id",
+    "heartbeat_id",
+    "previous_expires_at",
+    "renewed_until",
+    "heartbeat_seq",
+    "heartbeat_hash",
+    "final_journal_root_hash"
+  ],
+  "properties": {
+    "session_id": { "type": "string", "minLength": 1 },
+    "action_id": { "type": "string", "minLength": 1 },
+    "lease_id": { "type": "string", "minLength": 1 },
+    "heartbeat_id": { "type": "string", "minLength": 1 },
+    "previous_expires_at": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "renewed_until": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "heartbeat_seq": { "$ref": "common.schema.json#/$defs/uint" },
+    "heartbeat_hash": { "$ref": "common.schema.json#/$defs/hash_value" },
+    "final_journal_root_hash": { "$ref": "common.schema.json#/$defs/hash_value" }
+  }
+}
