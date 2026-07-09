@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "runtime-approval-request.schema.json",
+  "title": "RuntimeApprovalRequest",
+  "description": "HTTP/runtime request body for recording action-bound approval evidence through the daemon boundary. The session id and action id are path parameters for /v1/sessions/<session-id>/actions/<action-id>/approval.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["grant_id", "reviewer_id"],
+  "properties": {
+    "grant_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Grant being approved. It must be one of the action manifest's required grants and must have been issued in the session."
+    },
+    "reviewer_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Reviewer identity to bind into ApprovalEvidence. Policy admission later checks this against the grant approval requirement."
+    },
+    "review_id": {
+      "type": "string",
+      "description": "Optional stable review id. When omitted or blank, the daemon derives review-<action-id>-<grant-id>."
+    },
+    "approved_at": {
+      "$ref": "common.schema.json#/$defs/timestamp",
+      "description": "Optional approval timestamp. It must not be in the future relative to the daemon append time."
+    },
+    "readmit": {
+      "type": "boolean",
+      "default": false,
+      "description": "When true, the daemon immediately re-runs admission for the same manifest after appending the approval."
+    }
+  }
+}

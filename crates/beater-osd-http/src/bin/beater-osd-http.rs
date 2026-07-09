@@ -1375,19 +1375,23 @@ fn approval_route(
         Ok(record) => record,
         Err(err) => return daemon_error_response(err),
     };
+    let mut final_journal_root_hash = record.hash.clone();
     let readmission = if readmit {
         match store.admit_action(session_id, manifest) {
-            Ok(outcome) => Some(ApprovalReadmissionResponse {
-                decision: decision_result_to_string(&outcome.decision.result).to_string(),
-                decision_id: outcome.decision.decision_id,
-                explanation: outcome.decision.explanation,
-                matched_rules: outcome.decision.matched_rules,
-                required_review: outcome.decision.required_review,
-                required_simulation: outcome.decision.required_simulation,
-                decision_seq: outcome.decision_record.seq,
-                decision_hash: outcome.decision_record.hash.clone(),
-                final_journal_root_hash: outcome.decision_record.hash,
-            }),
+            Ok(outcome) => {
+                final_journal_root_hash = outcome.decision_record.hash.clone();
+                Some(ApprovalReadmissionResponse {
+                    decision: decision_result_to_string(&outcome.decision.result).to_string(),
+                    decision_id: outcome.decision.decision_id,
+                    explanation: outcome.decision.explanation,
+                    matched_rules: outcome.decision.matched_rules,
+                    required_review: outcome.decision.required_review,
+                    required_simulation: outcome.decision.required_simulation,
+                    decision_seq: outcome.decision_record.seq,
+                    decision_hash: outcome.decision_record.hash.clone(),
+                    final_journal_root_hash: outcome.decision_record.hash,
+                })
+            }
             Err(err) => return daemon_error_response(err),
         }
     } else {
@@ -1401,7 +1405,7 @@ fn approval_route(
             review_id,
             approval_seq: record.seq,
             approval_hash: record.hash.clone(),
-            final_journal_root_hash: record.hash,
+            final_journal_root_hash,
             readmission,
         },
     )

@@ -32,6 +32,8 @@ they diverge.
 | `runtime-memory-record-response.schema.json` | HTTP/runtime response after a daemon-journaled `MemoryWritten` record | §7.7, §12.6, §13.4 |
 | `runtime-memory-context-request.schema.json` | HTTP/runtime wrapper for selecting memory context under one daemon session | §7.7, §12.6, §13.4 |
 | `runtime-memory-context-outcome.schema.json` | HTTP/runtime memory context response bound to journal root and projection summary | §7.7, §12.6, §13.4 |
+| `runtime-approval-request.schema.json` | HTTP/runtime request for daemon-recorded action-bound approval evidence | §7.9, §12.4, §13.14 |
+| `runtime-approval-response.schema.json` | HTTP/runtime response after an `ApprovalRecorded` event and optional readmission decision append | §7.9, §12.4, §13.14 |
 | `payment-mandate.schema.json` | PaymentMandate runtime mirror; core shape owned by `spec/contracts` | §12.7, §16.1 |
 | `scenario-manifest.schema.json` | ScenarioManifest runtime mirror; core shape owned by `spec/contracts` | §7.10, §12.8 |
 | `journal.schema.json` | JournalRecord + JournalEvent | §4.5, §10.4 |
