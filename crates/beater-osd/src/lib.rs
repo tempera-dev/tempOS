@@ -1,4 +1,4 @@
-//! Durable single-writer runtime store for the local beaterOS daemon.
+//! Durable single-writer runtime store for the local tempOS daemon.
 //!
 //! This crate is the first `beater-osd` foundation slice: it moves durable
 //! journal ownership behind a serialized runtime boundary without changing the

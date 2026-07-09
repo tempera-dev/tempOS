@@ -1,7 +1,7 @@
-# tempOS / beaterOS
+# tempOS
 
 tempOS is the long-horizon, agent-first operating-system program currently
-implemented in this repository under the beaterOS crate and binary names. The
+implemented in this repository under the existing `beater-os-*` crate and binary names. The
 end state is not an app shell or agent framework. It is an OS stack that can
 touch metal where agents need native scheduler, memory, IO, device, isolation,
 authority, audit, accelerator, payment, and recovery boundaries. The first
@@ -42,7 +42,7 @@ that a real metal-touching agent OS would need.
 
 | Area | Start here | Why it matters |
 | --- | --- | --- |
-| Product thesis | [final.md](final.md) | Full first-principles plan for hosted and metal-touching beaterOS |
+| Product thesis | [final.md](final.md) | Full first-principles plan for hosted and metal-touching tempOS |
 | Agent startup context | [AGENTS.md](AGENTS.md) | Repo map, non-negotiables, and common commands |
 | Repository map | [docs/repo-map.md](docs/repo-map.md) | Runtime ownership boundaries and migration frontier |
 | Review skill | [beateros-pr-review SKILL](.codex/skills/beateros-pr-review/SKILL.md) | Non-author review and repetitive infra/docs duty flow |
@@ -78,7 +78,7 @@ Important `final.md` sections:
 | [14](final.md#14-simulation-and-evals) | Simulation and evals |
 | [20](final.md#20-critical-open-questions) | Critical open questions |
 | [21](final.md#21-non-goals) | Non-goals |
-| [24](final.md#24-minimum-viable-beateros) | Minimum viable beaterOS |
+| [24](final.md#24-minimum-viable-beateros) | Minimum viable tempOS |
 | [27](final.md#27-source-matrix) | Source matrix |
 
 ## First-Principles Direction
@@ -109,7 +109,7 @@ contracts as CPU and IO. The project should optimize model residency,
 host-device copies, batching, accelerator partitioning, and fallback routing
 without making any one vendor SDK the operating-system boundary.
 
-Tempo and the rest of the ecosystem should run on beaterOS contracts: browser
+Tempo and the rest of the ecosystem should run on tempOS contracts: browser
 actions, sandboxed tools, model calls, memory projections, and receipts all flow
 through native policy, journal, and audit services. The UI can stay high-level;
 the OS boundary stays explicit, typed, measured, and replayable.
@@ -125,12 +125,12 @@ existing kernel.
 
 The near-term project is not a broad hardware driver stack, a macOS replacement,
 a crypto network, a polished desktop shell, or a general chatbot UI. A
-metal-touching beaterOS is in scope only when hosted traces and benchmarks prove
+metal-touching tempOS is in scope only when hosted traces and benchmarks prove
 which low-level OS boundaries need to exist.
 
 ## Development
 
-beaterOS follows the neighboring Beater Rust workspace style:
+tempOS follows the neighboring Beater Rust workspace style:
 
 ```sh
 cargo fmt --all -- --check
@@ -155,11 +155,11 @@ performance and authority claims.
 
 ## License
 
-beaterOS is licensed under the [Apache License 2.0](LICENSE).
+tempOS is licensed under the [Apache License 2.0](LICENSE).
 
 ## Ecosystem
 
-beaterOS is part of the Tempera ecosystem at [`tempera-dev/tempOS`](https://github.com/tempera-dev/tempOS) — a family of Rust-first, local-first agent-infrastructure projects. It is fully standalone: the kernel contracts, policy engine, and conformance suite are usable by any agent runtime. Within the family it is the governance spine, with designed-for connections (each lands only with a real consumer) for:
+tempOS is part of the Tempera ecosystem at [`tempera-dev/tempOS`](https://github.com/tempera-dev/tempOS) — a family of Rust-first, local-first agent-infrastructure projects. It is fully standalone: the kernel contracts, policy engine, and conformance suite are usable by any agent runtime. Within the family it is the governance spine, with designed-for connections (each lands only with a real consumer) for:
 
 - policy and authority over agents running in [beater.js](https://github.com/jadenfix/beater.js) and browsing via [tempo](https://github.com/jadenfix/tempo)
 - sandboxed side effects through [beatbox](https://github.com/jadenfix/beatbox) and memory provenance through [beater-memory](https://github.com/jadenfix/beater-memory)

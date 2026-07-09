@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "common.schema.json",
-  "title": "beaterOS Common Definitions",
-  "description": "Shared enums and value objects used across the beaterOS core data contracts (final.md sections 7 and 12). This is the language-neutral wire contract: any implementation's serialized objects (e.g. crates/beater-os-core) must validate against these definitions.",
+  "title": "tempOS Common Definitions",
+  "description": "Shared enums and value objects used across the tempOS core data contracts (final.md sections 7 and 12). This is the language-neutral wire contract: any implementation's serialized objects (e.g. crates/beater-os-core) must validate against these definitions.",
   "$defs": {
     "ActionKind": {
       "description": "final.md 7.3 / contracts.rs ActionKind. The verb an action performs.",
