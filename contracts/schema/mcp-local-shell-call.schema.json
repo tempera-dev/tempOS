@@ -45,8 +45,10 @@
         "pattern": "^BEATER_[A-Za-z0-9_]*$"
       },
       "additionalProperties": {
-        "type": "string"
+        "type": "string",
+        "maxLength": 8192
       },
+      "maxProperties": 15,
       "description": "Optional non-secret BEATER_* variables layered over the gateway's safe sandbox PATH. PATH, inherited process environment, and BEATER_* names that look like tokens, secrets, keys, passwords, auth, bearer, or credentials are never accepted."
     },
     "grants": {
@@ -92,12 +94,14 @@
     "max_output_bytes": {
       "type": "integer",
       "minimum": 1,
+      "maximum": 65536,
       "description": "Per-call sandbox stdout/stderr collection cap. The runtime additionally refuses values above SandboxLimits::default().max_output_bytes."
     },
     "max_model_output_bytes": {
       "type": "integer",
       "minimum": 1,
-      "description": "Per-call cap for the model-visible text fallback. The runtime additionally refuses values above the server-configured maximum."
+      "maximum": 65536,
+      "description": "Per-call cap for the model-visible text fallback. The runtime additionally refuses values above the server-configured maximum, which defaults lower than this schema-wide ceiling."
     },
     "explanation": {
       "type": "string",

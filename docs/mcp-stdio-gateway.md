@@ -56,6 +56,9 @@ Required runtime inputs:
 - Per-call caps for wall-clock runtime, sandbox stdout/stderr bytes, argument
   vector length, argument byte length, grant count, identifier length, cwd
   length, and model-visible text bytes.
+- Caller-supplied environment is capped at 15 `BEATER_*` variables, with each
+  value capped at 8192 bytes and the merged sandbox environment still subject
+  to the sandbox aggregate byte limit.
 
 The gateway should fail closed at startup when required authority inputs are
 missing. It should fail closed per call when requested grants, cwd, command,
