@@ -6,8 +6,10 @@ and MVP claims concrete (§2.2, §24). Each `*.trace.json` conforms to
 gate for schema conformance, hash-linked receipt/journal chains, journal
 causality, independent policy admission of every recorded decision, and
 top-level model-route decision evidence matching `model_route_decided` journal
-events. These fixtures do not exercise model routing yet, so their
-`model_route_decisions` sections are present and empty.
+events. Memory write evidence is likewise checked against `memory_written`
+journal events in append order. These fixtures do not exercise model routing or
+memory writes yet, so their `model_route_decisions` and `memory_records`
+sections are present and empty.
 
 ## Bundles
 

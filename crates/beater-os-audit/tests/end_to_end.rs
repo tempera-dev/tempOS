@@ -312,6 +312,7 @@ fn trace_bundle_from_snapshot(snapshot: &JournalSnapshot) -> TraceBundle {
         manifests: Vec::new(),
         decisions: Vec::new(),
         model_route_decisions: Vec::new(),
+        memory_records: Vec::new(),
         receipts: Vec::new(),
         journal: snapshot.records.clone(),
     };
@@ -329,6 +330,9 @@ fn trace_bundle_from_snapshot(snapshot: &JournalSnapshot) -> TraceBundle {
             JournalEvent::ModelRouteDecided { decision } => {
                 bundle.model_route_decisions.push(decision.clone());
             }
+            JournalEvent::MemoryWritten { memory } => {
+                bundle.memory_records.push(memory.clone());
+            }
             JournalEvent::ApprovalRecorded { approval } => bundle.approvals.push(approval.clone()),
             JournalEvent::SimulationRecorded { simulation } => {
                 bundle.simulations.push(simulation.clone());
@@ -339,7 +343,6 @@ fn trace_bundle_from_snapshot(snapshot: &JournalSnapshot) -> TraceBundle {
             | JournalEvent::ExecutionLeaseIssued { .. }
             | JournalEvent::ExecutionLeaseHeartbeated { .. }
             | JournalEvent::ExecutionLeaseReconciled { .. }
-            | JournalEvent::MemoryWritten { .. }
             | JournalEvent::ScenarioEvaluated { .. }
             | JournalEvent::IncidentAnnotated { .. } => {}
         }

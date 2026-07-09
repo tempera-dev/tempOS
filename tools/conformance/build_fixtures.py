@@ -178,6 +178,7 @@ def build_bundle() -> dict:
         "manifests": [m_read, m_escape, m_fix, m_test],
         "decisions": [d_read, d_escape, d_fix, d_test],
         "model_route_decisions": [],
+        "memory_records": [],
         "receipts": receipts,
         "journal": journal,
     }
@@ -340,6 +341,7 @@ def build_payment_bundle() -> dict:
         "manifests": [m_pay],
         "decisions": [d_pay],
         "model_route_decisions": [],
+        "memory_records": [],
         "receipts": receipts,
         "journal": journal,
     }
@@ -427,6 +429,7 @@ def build_resilience_bundle() -> dict:
         "manifests": [m_deploy],
         "decisions": [d_deploy],
         "model_route_decisions": [],
+        "memory_records": [],
         "receipts": [],
         "journal": journal,
     }

@@ -227,6 +227,7 @@
     }
   ],
   "model_route_decisions": [],
+  "memory_records": [],
   "receipts": [
     {
       "receipt_id": "rcpt-read",

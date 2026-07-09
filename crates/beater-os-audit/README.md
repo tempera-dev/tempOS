@@ -44,6 +44,9 @@ the same code path that *produced* it. It re-derives the audit invariants from
   `model_route_decisions` against `ModelRouteDecided` journal events so routing
   evidence stays replayable without embedding full catalogs, prompts, or
   provider credentials.
+- **Full trace memory evidence** — `verify-trace` compares exported
+  `memory_records` against every `MemoryWritten` journal event in append order.
+  This is write evidence, not the deduped latest-memory context projection.
 
 ## CLI
 

@@ -6,7 +6,7 @@ use beater_os_core::{
     ActionKind, ActionManifest, AgentSession, ApprovalEvidence, ApprovalMode, ApprovalRequirement,
     Budget, CapabilityGrant, CapabilityReceiptInput, CapabilityScope, CapabilitySelector,
     DataClass, DecisionResult, ExecutionLeaseReconciliation, ExecutionLeaseResolution,
-    GrantConstraints, HashValue, MemoryRecord, PaymentIntent, PaymentMandate,
+    GrantConstraints, HashValue, JournalEvent, MemoryRecord, PaymentIntent, PaymentMandate,
     PaymentReceiptEvidence, PaymentSettlementStatus, ResourceKind, RiskClass, SessionStatus,
     SideEffectClass, SimulationEvidence, TaintLabel, hash_json,
 };
@@ -1566,6 +1566,15 @@ fn trace_export(store: &Store, args: &ParsedArgs) -> CliResult<String> {
                 .map(|grant| grant.policy_version.clone())
         })
         .unwrap_or_else(|| POLICY_VERSION.to_string());
+    let memory_records = export
+        .journal
+        .records
+        .iter()
+        .filter_map(|record| match &record.event {
+            JournalEvent::MemoryWritten { memory } => Some(memory.clone()),
+            _ => None,
+        })
+        .collect();
     let bundle = beater_os_audit::TraceBundle {
         bundle_id,
         description,
@@ -1578,6 +1587,7 @@ fn trace_export(store: &Store, args: &ParsedArgs) -> CliResult<String> {
         manifests: export.projection.manifests,
         decisions: export.projection.decisions,
         model_route_decisions: export.projection.model_route_decisions,
+        memory_records,
         receipts: export.projection.receipts,
         journal: export.journal.records,
     };

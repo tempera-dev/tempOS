@@ -596,9 +596,10 @@ macOS local lane. Linux `seccomp`/Landlock/cgroups and container/VM lanes
 
 `trace export --session <id>` emits the full core-wire replay artifact for one
 session: session, grants, payment mandates, approvals, simulations, manifests,
-policy decisions, model route decisions, receipts, and journal records.
-`--bundle-id <id>` overrides the default `<session>:<journal-root-hash>`;
-`--description <text>` adds an optional human note.
+policy decisions, compact model route decisions, memory write records, receipts,
+and journal records. `--bundle-id <id>` overrides the default
+`<session>:<journal-root-hash>`; `--description <text>` adds an optional human
+note.
 
 The export is read-only and holds the daemon session lock once, so projection
 arrays and journal records come from the same verified journal snapshot. It
@@ -622,8 +623,9 @@ $ beateros-audit verify-trace --expected-root <journal-root-hash> trace-bundle.j
 projection arrays from that journal, compares them to the exported arrays, and
 verifies the receipt chain from `ReceiptAppended` events. Model route decisions
 are checked as compact journal evidence (`ModelRouteDecided`), not as full route
-catalogs or prompt data. It is not an import, resume, restore, or live replay
-path.
+catalogs or prompt data. Memory records are checked as every `MemoryWritten`
+event in journal order, not as a deduped latest-memory projection. It is not an
+import, resume, restore, or live replay path.
 
 ## Invariants preserved
 

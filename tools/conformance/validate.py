@@ -133,6 +133,16 @@ def check_trace_bundle(rep: Report, reg, path: Path) -> None:
         f"trace {name} model-route-decisions",
         "top-level model_route_decisions must match model_route_decided journal events",
     )
+    projected_memory_records = [
+        record.get("event", {}).get("memory")
+        for record in bundle.get("journal", [])
+        if record.get("event", {}).get("kind") == "memory_written"
+    ]
+    rep.check(
+        bundle.get("memory_records", []) == projected_memory_records,
+        f"trace {name} memory-records",
+        "top-level memory_records must match memory_written journal events",
+    )
 
     # Independent admission: each decision must match a re-derived admit().
     decisions = bundle.get("decisions", [])
