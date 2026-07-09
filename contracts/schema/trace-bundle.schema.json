@@ -42,7 +42,37 @@
       "items": { "$ref": "memory-record.schema.json" },
       "default": []
     },
+    "scenario_evaluations": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/scenario_evaluation" },
+      "default": []
+    },
+    "incident_annotations": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/incident_annotation" },
+      "default": []
+    },
     "receipts": { "type": "array", "items": { "$ref": "capability-receipt.schema.json" } },
     "journal": { "type": "array", "items": { "$ref": "journal.schema.json" } }
+  },
+  "$defs": {
+    "scenario_evaluation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scenario", "passed"],
+      "properties": {
+        "scenario": { "$ref": "scenario-manifest.schema.json" },
+        "passed": { "type": "boolean" }
+      }
+    },
+    "incident_annotation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["incident_id", "note"],
+      "properties": {
+        "incident_id": { "type": "string", "minLength": 1 },
+        "note": { "type": "string" }
+      }
+    }
   }
 }

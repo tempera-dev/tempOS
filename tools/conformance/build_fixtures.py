@@ -182,6 +182,8 @@ def build_bundle() -> dict:
         "execution_reconciliations": [],
         "model_route_decisions": [],
         "memory_records": [],
+        "scenario_evaluations": [],
+        "incident_annotations": [],
         "receipts": receipts,
         "journal": journal,
     }
@@ -348,6 +350,8 @@ def build_payment_bundle() -> dict:
         "execution_reconciliations": [],
         "model_route_decisions": [],
         "memory_records": [],
+        "scenario_evaluations": [],
+        "incident_annotations": [],
         "receipts": receipts,
         "journal": journal,
     }
@@ -413,15 +417,18 @@ def build_resilience_bundle() -> dict:
 
     d_deploy = _decision("dec-deploy", m_deploy, "needs_approval", tr.format(1),
                          "grant policy requires human approval for this risk class")
+    incident = {
+        "incident_id": "inc-review-timeout",
+        "note": "Human approval for act-deploy-r42 timed out past the review deadline; "
+                "action not executed; session failing closed (final.md §14.2, §13.15).",
+    }
 
     events = [
         {"kind": "session_created", "session": session},
         {"kind": "capability_granted", "grant": grant},
         {"kind": "action_proposed", "manifest": m_deploy},
         {"kind": "policy_decided", "decision": d_deploy},
-        {"kind": "incident_annotated", "incident_id": "inc-review-timeout",
-         "note": "Human approval for act-deploy-r42 timed out past the review deadline; "
-                 "action not executed; session failing closed (final.md §14.2, §13.15)."},
+        {"kind": "incident_annotated", **incident},
     ]
     times = [tr.format(0), tr.format(0), tr.format(1), tr.format(1), tr.format(2)]
     journal = _chain_journal(events, times)
@@ -439,6 +446,8 @@ def build_resilience_bundle() -> dict:
         "execution_reconciliations": [],
         "model_route_decisions": [],
         "memory_records": [],
+        "scenario_evaluations": [],
+        "incident_annotations": [incident],
         "receipts": [],
         "journal": journal,
     }

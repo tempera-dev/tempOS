@@ -11,7 +11,8 @@ use beater_os_core::{
     ActionManifest, AgentSession, ApprovalEvidence, CapabilityGrant, CapabilityReceipt,
     ExecutionLease, ExecutionLeaseHeartbeat, ExecutionLeaseReconciliation, InMemoryJournal,
     JournalEvent, JournalRecord, JournalSnapshot, MemoryRecord, ModelRouteDecisionRecord,
-    PaymentMandate, PolicyDecision, ReceiptLedger, SessionStatus, SimulationEvidence,
+    PaymentMandate, PolicyDecision, ReceiptLedger, ScenarioManifest, SessionStatus,
+    SimulationEvidence,
 };
 use serde::{Deserialize, Serialize};
 
@@ -44,8 +45,26 @@ pub struct TraceBundle {
     pub model_route_decisions: Vec<ModelRouteDecisionRecord>,
     #[serde(default)]
     pub memory_records: Vec<MemoryRecord>,
+    #[serde(default)]
+    pub scenario_evaluations: Vec<ScenarioEvaluation>,
+    #[serde(default)]
+    pub incident_annotations: Vec<IncidentAnnotation>,
     pub receipts: Vec<CapabilityReceipt>,
     pub journal: Vec<JournalRecord>,
+}
+
+/// One `ScenarioEvaluated` journal event projected into a trace bundle.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScenarioEvaluation {
+    pub scenario: ScenarioManifest,
+    pub passed: bool,
+}
+
+/// One `IncidentAnnotated` journal event projected into a trace bundle.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IncidentAnnotation {
+    pub incident_id: String,
+    pub note: String,
 }
 
 /// Serialize a full trace bundle to pretty JSON.
@@ -79,6 +98,8 @@ pub struct TraceBundleVerificationReport {
     pub execution_reconciliations: usize,
     pub model_route_decisions: usize,
     pub memory_records: usize,
+    pub scenario_evaluations: usize,
+    pub incident_annotations: usize,
     pub receipts: usize,
     pub checks: Vec<CheckResult>,
 }
@@ -97,6 +118,8 @@ struct ProjectedTrace {
     execution_reconciliations: Vec<ExecutionLeaseReconciliation>,
     model_route_decisions: Vec<ModelRouteDecisionRecord>,
     memory_records: Vec<MemoryRecord>,
+    scenario_evaluations: Vec<ScenarioEvaluation>,
+    incident_annotations: Vec<IncidentAnnotation>,
     receipts: Vec<CapabilityReceipt>,
 }
 
@@ -245,6 +268,18 @@ pub fn verify_trace_bundle_with_options(
     );
     push_section_check(
         &mut checks,
+        "scenario_evaluations",
+        &bundle.scenario_evaluations,
+        &projected.scenario_evaluations,
+    );
+    push_section_check(
+        &mut checks,
+        "incident_annotations",
+        &bundle.incident_annotations,
+        &projected.incident_annotations,
+    );
+    push_section_check(
+        &mut checks,
         "receipts",
         &bundle.receipts,
         &projected.receipts,
@@ -284,6 +319,8 @@ pub fn verify_trace_bundle_with_options(
         execution_reconciliations: projected.execution_reconciliations.len(),
         model_route_decisions: projected.model_route_decisions.len(),
         memory_records: projected.memory_records.len(),
+        scenario_evaluations: projected.scenario_evaluations.len(),
+        incident_annotations: projected.incident_annotations.len(),
         receipts: projected.receipts.len(),
         checks,
     }
@@ -362,7 +399,18 @@ fn project_trace_from_journal(records: &[JournalRecord]) -> Result<ProjectedTrac
             JournalEvent::MemoryWritten { memory } => {
                 projected.memory_records.push(memory.clone());
             }
-            JournalEvent::ScenarioEvaluated { .. } | JournalEvent::IncidentAnnotated { .. } => {}
+            JournalEvent::ScenarioEvaluated { scenario, passed } => {
+                projected.scenario_evaluations.push(ScenarioEvaluation {
+                    scenario: scenario.clone(),
+                    passed: *passed,
+                });
+            }
+            JournalEvent::IncidentAnnotated { incident_id, note } => {
+                projected.incident_annotations.push(IncidentAnnotation {
+                    incident_id: incident_id.clone(),
+                    note: note.clone(),
+                });
+            }
         }
     }
     if projected
@@ -462,6 +510,8 @@ mod tests {
             execution_reconciliations: Vec::new(),
             model_route_decisions: Vec::new(),
             memory_records: Vec::new(),
+            scenario_evaluations: Vec::new(),
+            incident_annotations: Vec::new(),
             receipts: Vec::new(),
             journal: Vec::new(),
         }
@@ -478,6 +528,8 @@ mod tests {
         assert!(json.contains("\"execution_reconciliations\""));
         assert!(json.contains("\"model_route_decisions\""));
         assert!(json.contains("\"memory_records\""));
+        assert!(json.contains("\"scenario_evaluations\""));
+        assert!(json.contains("\"incident_annotations\""));
         assert!(json.contains("\"journal\""));
         assert!(!json.contains("\"description\""));
     }
@@ -503,6 +555,8 @@ mod tests {
         assert!(bundle.execution_reconciliations.is_empty());
         assert!(bundle.model_route_decisions.is_empty());
         assert!(bundle.memory_records.is_empty());
+        assert!(bundle.scenario_evaluations.is_empty());
+        assert!(bundle.incident_annotations.is_empty());
     }
 
     #[test]
@@ -696,6 +750,81 @@ mod tests {
                     && check.outcome == CheckOutcome::Fail
             }),
             "expected execution lease section mismatch, got {report:?}"
+        );
+    }
+
+    fn scenario_manifest() -> ScenarioManifest {
+        ScenarioManifest {
+            scenario_id: "scenario-route".to_string(),
+            goal: "exercise trace scenario projection".to_string(),
+            environment: "unit".to_string(),
+            fixtures: Default::default(),
+            allowed_tools: BTreeSet::from(["tool:route".to_string()]),
+            forbidden_actions: Default::default(),
+            oracle: "scenario event is projected".to_string(),
+            success_criteria: vec!["projection preserved".to_string()],
+            risk_traps: Vec::new(),
+            budget: Default::default(),
+            expected_trace_properties: vec!["scenario_evaluated".to_string()],
+        }
+    }
+
+    #[test]
+    fn scenario_and_incident_events_project_from_journal() {
+        let scenario = scenario_manifest();
+        let scenario_event = ScenarioEvaluation {
+            scenario: scenario.clone(),
+            passed: true,
+        };
+        let incident = IncidentAnnotation {
+            incident_id: "incident-route".to_string(),
+            note: "scenario generated an incident note".to_string(),
+        };
+        let records = vec![
+            JournalRecord {
+                seq: 0,
+                created_at: Utc.with_ymd_and_hms(2026, 7, 9, 1, 0, 0).unwrap(),
+                event: JournalEvent::ScenarioEvaluated {
+                    scenario,
+                    passed: true,
+                },
+                prev_hash: "0000000000000000000000000000000000000000000000000000000000000000"
+                    .to_string(),
+                hash: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                    .to_string(),
+            },
+            JournalRecord {
+                seq: 1,
+                created_at: Utc.with_ymd_and_hms(2026, 7, 9, 1, 1, 0).unwrap(),
+                event: JournalEvent::IncidentAnnotated {
+                    incident_id: incident.incident_id.clone(),
+                    note: incident.note.clone(),
+                },
+                prev_hash: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                    .to_string(),
+                hash: "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+                    .to_string(),
+            },
+        ];
+        let projected = project_trace_from_journal(&records).expect("project trace");
+        assert_eq!(projected.scenario_evaluations, vec![scenario_event]);
+        assert_eq!(projected.incident_annotations, vec![incident]);
+    }
+
+    #[test]
+    fn forged_incident_annotation_section_fails_verification() {
+        let mut bundle = empty_trace_bundle();
+        bundle.incident_annotations.push(IncidentAnnotation {
+            incident_id: "incident-forged".to_string(),
+            note: "not in journal".to_string(),
+        });
+        let report = verify_trace_bundle(&bundle);
+        assert!(
+            report.checks.iter().any(|check| {
+                check.check == "trace_bundle_incident_annotations"
+                    && check.outcome == CheckOutcome::Fail
+            }),
+            "expected incident annotation section mismatch, got {report:?}"
         );
     }
 }
