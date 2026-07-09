@@ -1,4 +1,4 @@
-//! Independent verification of a beaterOS journal snapshot.
+//! Independent verification of a tempOS journal snapshot.
 //!
 //! `final.md` §8.15 argues for a small trusted computing base that can be
 //! re-verified, and §13.11 requires tamper-evident logs. This module is a
