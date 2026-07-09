@@ -174,6 +174,22 @@ def check_trace_bundle(rep: Report, reg, path: Path) -> None:
         f"trace {name} memory-records",
         "top-level memory_records must match memory_written journal events",
     )
+    projected_capability_revocations = [
+        {
+            "grant_id": record.get("event", {}).get("grant_id"),
+            "revocation_handle": record.get("event", {}).get("revocation_handle"),
+            "revoked_by": record.get("event", {}).get("revoked_by"),
+            "reason": record.get("event", {}).get("reason"),
+        }
+        for record in bundle.get("journal", [])
+        if record.get("event", {}).get("kind") == "capability_revoked"
+    ]
+    rep.check(
+        bundle.get("capability_revocations", [])
+        == projected_capability_revocations,
+        f"trace {name} capability-revocations",
+        "top-level capability_revocations must match capability_revoked journal events",
+    )
     projected_scenario_evaluations = [
         {
             "scenario": record.get("event", {}).get("scenario"),

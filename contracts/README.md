@@ -36,7 +36,7 @@ they diverge.
 | `scenario-manifest.schema.json` | ScenarioManifest runtime mirror; core shape owned by `spec/contracts` | §7.10, §12.8 |
 | `journal.schema.json` | JournalRecord + JournalEvent | §4.5, §10.4 |
 | `common.schema.json` | Shared enums + sub-structures | — |
-| `trace-bundle.schema.json` | A full end-to-end run (harness input), including execution leases, compact model-route decisions, memory writes, scenarios, and incidents | §24 |
+| `trace-bundle.schema.json` | A full end-to-end run (harness input), including revocations, execution leases, compact model-route decisions, memory writes, scenarios, and incidents | §24 |
 | `security-scenario.schema.json` | Adversarial eval + admission probe | §14.5 |
 | `performance-trace.schema.json` | Optimization trace evidence envelope | §8, §13 |
 | `accelerator-telemetry.schema.json` | Vendor-neutral accelerator job telemetry | §8, §13 |

@@ -30,6 +30,8 @@ pub struct TraceBundle {
     pub policy_version: String,
     pub sessions: Vec<AgentSession>,
     pub grants: Vec<CapabilityGrant>,
+    #[serde(default)]
+    pub capability_revocations: Vec<CapabilityRevocation>,
     pub payment_mandates: Vec<PaymentMandate>,
     pub approvals: Vec<ApprovalEvidence>,
     pub simulations: Vec<SimulationEvidence>,
@@ -67,6 +69,15 @@ pub struct IncidentAnnotation {
     pub note: String,
 }
 
+/// One `CapabilityRevoked` journal event projected into a trace bundle.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CapabilityRevocation {
+    pub grant_id: String,
+    pub revocation_handle: String,
+    pub revoked_by: String,
+    pub reason: String,
+}
+
 /// Serialize a full trace bundle to pretty JSON.
 pub fn trace_bundle_to_json(bundle: &TraceBundle) -> Result<String, serde_json::Error> {
     serde_json::to_string_pretty(bundle)
@@ -88,6 +99,7 @@ pub struct TraceBundleVerificationReport {
     pub journal_root_hash: String,
     pub receipt_root_hash: String,
     pub grants: usize,
+    pub capability_revocations: usize,
     pub payment_mandates: usize,
     pub approvals: usize,
     pub simulations: usize,
@@ -108,6 +120,7 @@ pub struct TraceBundleVerificationReport {
 struct ProjectedTrace {
     sessions: Vec<AgentSession>,
     grants: Vec<CapabilityGrant>,
+    capability_revocations: Vec<CapabilityRevocation>,
     payment_mandates: Vec<PaymentMandate>,
     approvals: Vec<ApprovalEvidence>,
     simulations: Vec<SimulationEvidence>,
@@ -206,6 +219,12 @@ pub fn verify_trace_bundle_with_options(
         &projected.sessions,
     );
     push_section_check(&mut checks, "grants", &bundle.grants, &projected.grants);
+    push_section_check(
+        &mut checks,
+        "capability_revocations",
+        &bundle.capability_revocations,
+        &projected.capability_revocations,
+    );
     push_section_check(
         &mut checks,
         "payment_mandates",
@@ -309,6 +328,7 @@ pub fn verify_trace_bundle_with_options(
         journal_root_hash,
         receipt_root_hash: receipt_ledger.root_hash(),
         grants: projected.grants.len(),
+        capability_revocations: projected.capability_revocations.len(),
         payment_mandates: projected.payment_mandates.len(),
         approvals: projected.approvals.len(),
         simulations: projected.simulations.len(),
@@ -353,7 +373,8 @@ fn project_trace_from_journal(records: &[JournalRecord]) -> Result<ProjectedTrac
             JournalEvent::CapabilityRevoked {
                 grant_id,
                 revocation_handle,
-                ..
+                revoked_by,
+                reason,
             } => {
                 let Some(_grant) = projected.grants.iter().find(|grant| {
                     grant.grant_id == *grant_id && grant.revocation_handle == *revocation_handle
@@ -367,6 +388,12 @@ fn project_trace_from_journal(records: &[JournalRecord]) -> Result<ProjectedTrac
                 // this verifier byte-contract aligned with that exported shape;
                 // the revocation itself remains authoritative evidence in the
                 // journal that is independently verified above.
+                projected.capability_revocations.push(CapabilityRevocation {
+                    grant_id: grant_id.clone(),
+                    revocation_handle: revocation_handle.clone(),
+                    revoked_by: revoked_by.clone(),
+                    reason: reason.clone(),
+                });
             }
             JournalEvent::PaymentMandateIssued { mandate } => {
                 projected.payment_mandates.push(mandate.clone());
@@ -466,7 +493,8 @@ mod tests {
     use std::collections::BTreeSet;
 
     use beater_os_core::{
-        CapabilitySelector, ExecutionLeaseResolution, JournalEvent, JournalRecord, ResourceKind,
+        ActionKind, CapabilityScope, CapabilitySelector, DelegationMode, ExecutionLeaseResolution,
+        JournalEvent, JournalRecord, ResourceKind,
     };
     use chrono::{TimeZone, Utc};
 
@@ -500,6 +528,7 @@ mod tests {
             policy_version: "policy-test".to_string(),
             sessions: Vec::new(),
             grants: Vec::new(),
+            capability_revocations: Vec::new(),
             payment_mandates: Vec::new(),
             approvals: Vec::new(),
             simulations: Vec::new(),
@@ -523,6 +552,7 @@ mod tests {
         let json = trace_bundle_to_json(&bundle).unwrap_or_else(|err| err.to_string());
         assert!(json.contains("\"bundle_id\""));
         assert!(json.contains("\"sessions\""));
+        assert!(json.contains("\"capability_revocations\""));
         assert!(json.contains("\"execution_leases\""));
         assert!(json.contains("\"execution_lease_heartbeats\""));
         assert!(json.contains("\"execution_reconciliations\""));
@@ -551,12 +581,98 @@ mod tests {
         }"#;
         let bundle: TraceBundle = serde_json::from_str(json).expect("old bundle shape");
         assert!(bundle.execution_leases.is_empty());
+        assert!(bundle.capability_revocations.is_empty());
         assert!(bundle.execution_lease_heartbeats.is_empty());
         assert!(bundle.execution_reconciliations.is_empty());
         assert!(bundle.model_route_decisions.is_empty());
         assert!(bundle.memory_records.is_empty());
         assert!(bundle.scenario_evaluations.is_empty());
         assert!(bundle.incident_annotations.is_empty());
+    }
+
+    fn revocable_grant() -> CapabilityGrant {
+        CapabilityGrant {
+            grant_id: "grant-revoke-route".to_string(),
+            issuer: "issuer:trace".to_string(),
+            holder: "agent:trace".to_string(),
+            session_id: "session-route".to_string(),
+            parent_grant_id: None,
+            scope: CapabilityScope {
+                selector: CapabilitySelector {
+                    resource_kind: ResourceKind::Tool,
+                    resource_id: "tool:route".to_string(),
+                },
+                actions: BTreeSet::from([ActionKind::Execute]),
+            },
+            denied_actions: BTreeSet::new(),
+            constraints: Default::default(),
+            expires_at: Utc.with_ymd_and_hms(2026, 7, 9, 0, 10, 0).unwrap(),
+            delegation: DelegationMode::None,
+            approval: Default::default(),
+            revocation_handle: "revoke-handle-route".to_string(),
+            policy_version: "policy-test".to_string(),
+            reason: "trace fixture grant".to_string(),
+            revoked: false,
+        }
+    }
+
+    fn capability_revocation() -> CapabilityRevocation {
+        CapabilityRevocation {
+            grant_id: "grant-revoke-route".to_string(),
+            revocation_handle: "revoke-handle-route".to_string(),
+            revoked_by: "operator:trace".to_string(),
+            reason: "operator cancelled trace grant".to_string(),
+        }
+    }
+
+    #[test]
+    fn capability_revocations_project_from_journal() {
+        let grant = revocable_grant();
+        let revocation = capability_revocation();
+        let records = vec![
+            JournalRecord {
+                seq: 0,
+                created_at: Utc.with_ymd_and_hms(2026, 7, 9, 0, 0, 0).unwrap(),
+                event: JournalEvent::CapabilityGranted {
+                    grant: grant.clone(),
+                },
+                prev_hash: "0000000000000000000000000000000000000000000000000000000000000000"
+                    .to_string(),
+                hash: "1010101010101010101010101010101010101010101010101010101010101010"
+                    .to_string(),
+            },
+            JournalRecord {
+                seq: 1,
+                created_at: Utc.with_ymd_and_hms(2026, 7, 9, 0, 1, 0).unwrap(),
+                event: JournalEvent::CapabilityRevoked {
+                    grant_id: revocation.grant_id.clone(),
+                    revocation_handle: revocation.revocation_handle.clone(),
+                    revoked_by: revocation.revoked_by.clone(),
+                    reason: revocation.reason.clone(),
+                },
+                prev_hash: "1010101010101010101010101010101010101010101010101010101010101010"
+                    .to_string(),
+                hash: "2020202020202020202020202020202020202020202020202020202020202020"
+                    .to_string(),
+            },
+        ];
+        let projected = project_trace_from_journal(&records).expect("project trace");
+        assert_eq!(projected.grants, vec![grant]);
+        assert_eq!(projected.capability_revocations, vec![revocation]);
+    }
+
+    #[test]
+    fn forged_capability_revocation_section_fails_verification() {
+        let mut bundle = empty_trace_bundle();
+        bundle.capability_revocations.push(capability_revocation());
+        let report = verify_trace_bundle(&bundle);
+        assert!(
+            report.checks.iter().any(|check| {
+                check.check == "trace_bundle_capability_revocations"
+                    && check.outcome == CheckOutcome::Fail
+            }),
+            "expected capability revocation section mismatch, got {report:?}"
+        );
     }
 
     #[test]

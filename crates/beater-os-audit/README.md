@@ -44,6 +44,10 @@ the same code path that *produced* it. It re-derives the audit invariants from
   `execution_leases`, `execution_lease_heartbeats`, and
   `execution_reconciliations` against their journal events in append order. This
   is lifecycle evidence, not the current scheduler/open-lease projection.
+- **Full trace revocation evidence** — `verify-trace` compares exported
+  `capability_revocations` against `CapabilityRevoked` journal events in append
+  order. This is revocation evidence, not a mutation of the exported grants
+  array.
 - **Full trace route evidence** — `verify-trace` compares exported compact
   `model_route_decisions` against `ModelRouteDecided` journal events so routing
   evidence stays replayable without embedding full catalogs, prompts, or

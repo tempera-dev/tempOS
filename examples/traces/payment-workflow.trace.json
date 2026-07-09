@@ -84,6 +84,7 @@
       "reason": "Pay approved vendor invoices via the standing mandate."
     }
   ],
+  "capability_revocations": [],
   "approvals": [
     {
       "review_id": "review-pay",

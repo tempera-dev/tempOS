@@ -55,6 +55,7 @@
       "reason": "Deploy approved releases to production."
     }
   ],
+  "capability_revocations": [],
   "manifests": [
     {
       "action_id": "act-deploy-r42",
