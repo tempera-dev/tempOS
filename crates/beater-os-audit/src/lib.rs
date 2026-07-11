@@ -28,8 +28,8 @@ pub use bundle::{AuditBundle, RecordDigest, build_bundle, bundle_to_json};
 pub use metrics::{AuditMetrics, Coverage, compute_metrics};
 pub use trace::render_trace;
 pub use trace_bundle::{
-    CapabilityRevocation, IncidentAnnotation, ScenarioEvaluation, TraceBundle,
-    TraceBundleVerificationReport, TraceBundleVerifyOptions, trace_bundle_snapshot,
+    CapabilityRevocation, IncidentAnnotation, ScenarioEvaluation, SessionStatusTransition,
+    TraceBundle, TraceBundleVerificationReport, TraceBundleVerifyOptions, trace_bundle_snapshot,
     trace_bundle_to_json, verify_trace_bundle, verify_trace_bundle_with_options,
 };
 pub use verify::{

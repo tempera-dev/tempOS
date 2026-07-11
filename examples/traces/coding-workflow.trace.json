@@ -28,6 +28,7 @@
       "status": "completed"
     }
   ],
+  "session_status_transitions": [],
   "grants": [
     {
       "grant_id": "grant-repo-rw",

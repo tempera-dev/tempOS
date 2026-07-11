@@ -1575,6 +1575,25 @@ fn trace_export(store: &Store, args: &ParsedArgs) -> CliResult<String> {
             _ => None,
         })
         .collect();
+    let session_status_transitions = export
+        .journal
+        .records
+        .iter()
+        .filter_map(|record| match &record.event {
+            JournalEvent::SessionStatusChanged {
+                transition_id,
+                session_id,
+                from,
+                to,
+            } => Some(beater_os_audit::SessionStatusTransition {
+                transition_id: transition_id.clone(),
+                session_id: session_id.clone(),
+                from: from.clone(),
+                to: to.clone(),
+            }),
+            _ => None,
+        })
+        .collect();
     let capability_revocations = export
         .journal
         .records
@@ -1656,6 +1675,7 @@ fn trace_export(store: &Store, args: &ParsedArgs) -> CliResult<String> {
         description,
         policy_version,
         sessions: vec![export.projection.session],
+        session_status_transitions,
         grants: export.projection.grants,
         capability_revocations,
         payment_mandates: export.projection.mandates,

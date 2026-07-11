@@ -5,17 +5,19 @@ and MVP claims concrete (§2.2, §24). Each `*.trace.json` conforms to
 `contracts/schema/trace-bundle.schema.json` and is checked by the conformance
 gate for schema conformance, hash-linked receipt/journal chains, journal
 causality, independent policy admission of every recorded decision,
+session-transition evidence matching status-change journal events,
 execution-lease lifecycle evidence matching lease journal events, and top-level
 model-route decision evidence matching `model_route_decided` journal events.
 Capability revocations and memory write evidence are likewise checked against
 `capability_revoked` and `memory_written` journal events in append order, and
 scenario/incident evidence is checked against `scenario_evaluated` and
-`incident_annotated` events. These fixtures do not exercise capability
-revocation, daemon execution leases, model routing, memory writes, or scenario
-evaluations yet, so their `capability_revocations`, `execution_*`,
-`model_route_decisions`, `memory_records`, and `scenario_evaluations` sections
-are present and empty; the resilience fixture includes one
-`incident_annotations` entry for its timeout incident.
+`incident_annotated` events. These fixtures do not exercise session transitions,
+capability revocation, daemon execution leases, model routing, memory writes, or
+scenario evaluations yet, so their `session_status_transitions`,
+`capability_revocations`, `execution_*`, `model_route_decisions`,
+`memory_records`, and `scenario_evaluations` sections are present and empty; the
+resilience fixture includes one `incident_annotations` entry for its timeout
+incident.
 
 ## Bundles
 

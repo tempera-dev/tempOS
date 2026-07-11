@@ -29,6 +29,8 @@ pub struct TraceBundle {
     pub description: Option<String>,
     pub policy_version: String,
     pub sessions: Vec<AgentSession>,
+    #[serde(default)]
+    pub session_status_transitions: Vec<SessionStatusTransition>,
     pub grants: Vec<CapabilityGrant>,
     #[serde(default)]
     pub capability_revocations: Vec<CapabilityRevocation>,
@@ -78,6 +80,15 @@ pub struct CapabilityRevocation {
     pub reason: String,
 }
 
+/// One `SessionStatusChanged` journal event projected into a trace bundle.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionStatusTransition {
+    pub transition_id: String,
+    pub session_id: String,
+    pub from: SessionStatus,
+    pub to: SessionStatus,
+}
+
 /// Serialize a full trace bundle to pretty JSON.
 pub fn trace_bundle_to_json(bundle: &TraceBundle) -> Result<String, serde_json::Error> {
     serde_json::to_string_pretty(bundle)
@@ -98,6 +109,7 @@ pub struct TraceBundleVerificationReport {
     pub records: usize,
     pub journal_root_hash: String,
     pub receipt_root_hash: String,
+    pub session_status_transitions: usize,
     pub grants: usize,
     pub capability_revocations: usize,
     pub payment_mandates: usize,
@@ -119,6 +131,7 @@ pub struct TraceBundleVerificationReport {
 #[derive(Default)]
 struct ProjectedTrace {
     sessions: Vec<AgentSession>,
+    session_status_transitions: Vec<SessionStatusTransition>,
     grants: Vec<CapabilityGrant>,
     capability_revocations: Vec<CapabilityRevocation>,
     payment_mandates: Vec<PaymentMandate>,
@@ -217,6 +230,12 @@ pub fn verify_trace_bundle_with_options(
         "sessions",
         &bundle.sessions,
         &projected.sessions,
+    );
+    push_section_check(
+        &mut checks,
+        "session_status_transitions",
+        &bundle.session_status_transitions,
+        &projected.session_status_transitions,
     );
     push_section_check(&mut checks, "grants", &bundle.grants, &projected.grants);
     push_section_check(
@@ -327,6 +346,7 @@ pub fn verify_trace_bundle_with_options(
         records,
         journal_root_hash,
         receipt_root_hash: receipt_ledger.root_hash(),
+        session_status_transitions: projected.session_status_transitions.len(),
         grants: projected.grants.len(),
         capability_revocations: projected.capability_revocations.len(),
         payment_mandates: projected.payment_mandates.len(),
@@ -357,7 +377,12 @@ fn project_trace_from_journal(records: &[JournalRecord]) -> Result<ProjectedTrac
     for record in records {
         match &record.event {
             JournalEvent::SessionCreated { session } => projected.sessions.push(session.clone()),
-            JournalEvent::SessionStatusChanged { session_id, to, .. } => {
+            JournalEvent::SessionStatusChanged {
+                transition_id,
+                session_id,
+                from,
+                to,
+            } => {
                 let Some(session) = projected
                     .sessions
                     .iter_mut()
@@ -367,6 +392,14 @@ fn project_trace_from_journal(records: &[JournalRecord]) -> Result<ProjectedTrac
                         "session status transition references missing session {session_id}",
                     ));
                 };
+                projected
+                    .session_status_transitions
+                    .push(SessionStatusTransition {
+                        transition_id: transition_id.clone(),
+                        session_id: session_id.clone(),
+                        from: from.clone(),
+                        to: to.clone(),
+                    });
                 session.status = to.clone();
             }
             JournalEvent::CapabilityGranted { grant } => projected.grants.push(grant.clone()),
@@ -527,6 +560,7 @@ mod tests {
             description: None,
             policy_version: "policy-test".to_string(),
             sessions: Vec::new(),
+            session_status_transitions: Vec::new(),
             grants: Vec::new(),
             capability_revocations: Vec::new(),
             payment_mandates: Vec::new(),
@@ -552,6 +586,7 @@ mod tests {
         let json = trace_bundle_to_json(&bundle).unwrap_or_else(|err| err.to_string());
         assert!(json.contains("\"bundle_id\""));
         assert!(json.contains("\"sessions\""));
+        assert!(json.contains("\"session_status_transitions\""));
         assert!(json.contains("\"capability_revocations\""));
         assert!(json.contains("\"execution_leases\""));
         assert!(json.contains("\"execution_lease_heartbeats\""));
@@ -580,6 +615,7 @@ mod tests {
           "journal": []
         }"#;
         let bundle: TraceBundle = serde_json::from_str(json).expect("old bundle shape");
+        assert!(bundle.session_status_transitions.is_empty());
         assert!(bundle.execution_leases.is_empty());
         assert!(bundle.capability_revocations.is_empty());
         assert!(bundle.execution_lease_heartbeats.is_empty());
@@ -588,6 +624,93 @@ mod tests {
         assert!(bundle.memory_records.is_empty());
         assert!(bundle.scenario_evaluations.is_empty());
         assert!(bundle.incident_annotations.is_empty());
+    }
+
+    fn trace_session() -> AgentSession {
+        AgentSession {
+            session_id: "session-route".to_string(),
+            created_at: Utc.with_ymd_and_hms(2026, 7, 9, 0, 0, 0).unwrap(),
+            created_by: "operator:trace".to_string(),
+            agent_id: "agent:trace".to_string(),
+            workspace_id: "workspace:trace".to_string(),
+            goal: "exercise session transition projection".to_string(),
+            constraints: Vec::new(),
+            policy_profile: "policy-test".to_string(),
+            initial_capability_ids: BTreeSet::new(),
+            budget: Default::default(),
+            model_policy: Default::default(),
+            memory_scope: None,
+            journal_root: "0000000000000000000000000000000000000000000000000000000000000000"
+                .to_string(),
+            status: SessionStatus::Running,
+        }
+    }
+
+    fn session_status_transition() -> SessionStatusTransition {
+        SessionStatusTransition {
+            transition_id: "transition-route".to_string(),
+            session_id: "session-route".to_string(),
+            from: SessionStatus::Running,
+            to: SessionStatus::Canceled,
+        }
+    }
+
+    #[test]
+    fn session_status_transitions_project_from_journal() {
+        let session = trace_session();
+        let transition = session_status_transition();
+        let records = vec![
+            JournalRecord {
+                seq: 0,
+                created_at: session.created_at,
+                event: JournalEvent::SessionCreated {
+                    session: session.clone(),
+                },
+                prev_hash: "0000000000000000000000000000000000000000000000000000000000000000"
+                    .to_string(),
+                hash: "3030303030303030303030303030303030303030303030303030303030303030"
+                    .to_string(),
+            },
+            JournalRecord {
+                seq: 1,
+                created_at: Utc.with_ymd_and_hms(2026, 7, 9, 0, 1, 0).unwrap(),
+                event: JournalEvent::SessionStatusChanged {
+                    transition_id: transition.transition_id.clone(),
+                    session_id: transition.session_id.clone(),
+                    from: transition.from.clone(),
+                    to: transition.to.clone(),
+                },
+                prev_hash: "3030303030303030303030303030303030303030303030303030303030303030"
+                    .to_string(),
+                hash: "4040404040404040404040404040404040404040404040404040404040404040"
+                    .to_string(),
+            },
+        ];
+        let projected = project_trace_from_journal(&records).expect("project trace");
+        assert_eq!(
+            projected.sessions,
+            vec![AgentSession {
+                status: SessionStatus::Canceled,
+                ..session
+            }]
+        );
+        assert_eq!(projected.session_status_transitions, vec![transition]);
+    }
+
+    #[test]
+    fn forged_session_status_transition_section_fails_verification() {
+        let mut bundle = empty_trace_bundle();
+        bundle
+            .session_status_transitions
+            .push(session_status_transition());
+        let report = verify_trace_bundle(&bundle);
+        assert!(
+            report.checks.iter().any(|check| {
+                check.check == "trace_bundle_session_status_transitions"
+                    && check.outcome == CheckOutcome::Fail
+            }),
+            "expected session status transition section mismatch, got {report:?}"
+        );
     }
 
     fn revocable_grant() -> CapabilityGrant {

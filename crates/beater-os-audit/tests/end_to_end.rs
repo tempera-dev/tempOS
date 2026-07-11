@@ -305,6 +305,7 @@ fn trace_bundle_from_snapshot(snapshot: &JournalSnapshot) -> TraceBundle {
         description: Some("test trace bundle".to_string()),
         policy_version: "v1".to_string(),
         sessions: Vec::new(),
+        session_status_transitions: Vec::new(),
         grants: Vec::new(),
         capability_revocations: Vec::new(),
         payment_mandates: Vec::new(),
@@ -386,7 +387,28 @@ fn trace_bundle_from_snapshot(snapshot: &JournalSnapshot) -> TraceBundle {
                 bundle.simulations.push(simulation.clone());
             }
             JournalEvent::ReceiptAppended { receipt } => bundle.receipts.push(receipt.clone()),
-            JournalEvent::SessionStatusChanged { .. } => {}
+            JournalEvent::SessionStatusChanged {
+                transition_id,
+                session_id,
+                from,
+                to,
+            } => {
+                if let Some(session) = bundle
+                    .sessions
+                    .iter_mut()
+                    .find(|session| session.session_id == *session_id)
+                {
+                    session.status = to.clone();
+                }
+                bundle
+                    .session_status_transitions
+                    .push(beater_os_audit::SessionStatusTransition {
+                        transition_id: transition_id.clone(),
+                        session_id: session_id.clone(),
+                        from: from.clone(),
+                        to: to.clone(),
+                    });
+            }
         }
     }
     bundle

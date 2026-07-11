@@ -474,6 +474,13 @@ fn trace_export_emits_schema_shaped_live_bundle() {
     assert_eq!(json["sessions"][0]["session_id"], session);
     assert_eq!(json["grants"].as_array().expect("grants array").len(), 1);
     assert_eq!(
+        json["session_status_transitions"]
+            .as_array()
+            .expect("session_status_transitions array")
+            .len(),
+        0
+    );
+    assert_eq!(
         json["manifests"].as_array().expect("manifests array").len(),
         1
     );

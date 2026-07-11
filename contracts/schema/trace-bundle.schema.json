@@ -11,6 +11,11 @@
     "description": { "type": "string" },
     "policy_version": { "type": "string" },
     "sessions": { "type": "array", "items": { "$ref": "agent-session.schema.json" }, "minItems": 1 },
+    "session_status_transitions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/session_status_transition" },
+      "default": []
+    },
     "grants": { "type": "array", "items": { "$ref": "capability-grant.schema.json" } },
     "capability_revocations": {
       "type": "array",
@@ -61,6 +66,17 @@
     "journal": { "type": "array", "items": { "$ref": "journal.schema.json" } }
   },
   "$defs": {
+    "session_status_transition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["transition_id", "session_id", "from", "to"],
+      "properties": {
+        "transition_id": { "type": "string", "minLength": 1 },
+        "session_id": { "type": "string", "minLength": 1 },
+        "from": { "$ref": "common.schema.json#/$defs/session_status" },
+        "to": { "$ref": "common.schema.json#/$defs/session_status" }
+      }
+    },
     "capability_revocation": {
       "type": "object",
       "additionalProperties": false,
