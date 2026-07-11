@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "runtime-execution-claim-response.schema.json",
+  "title": "RuntimeExecutionClaimResponse",
+  "description": "HTTP/runtime response after the daemon atomically issues an ExecutionLeaseIssued journal record.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "session_id",
+    "action_id",
+    "lease_id",
+    "manifest_hash",
+    "decision_id",
+    "tool_id",
+    "tool_ref",
+    "target",
+    "required_grants",
+    "requested_budget",
+    "leased_at",
+    "expires_at",
+    "lease_seq",
+    "lease_hash",
+    "journal_root_hash"
+  ],
+  "properties": {
+    "session_id": { "type": "string", "minLength": 1 },
+    "action_id": { "type": "string", "minLength": 1 },
+    "lease_id": { "type": "string", "minLength": 1 },
+    "manifest_hash": { "$ref": "common.schema.json#/$defs/hash_value" },
+    "decision_id": { "type": "string", "minLength": 1 },
+    "tool_id": { "type": "string", "minLength": 1 },
+    "tool_ref": { "type": "string", "minLength": 1 },
+    "target": { "$ref": "common.schema.json#/$defs/capability_selector" },
+    "required_grants": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "requested_budget": { "$ref": "#/$defs/runtime_budget" },
+    "leased_at": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "expires_at": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "lease_seq": { "$ref": "common.schema.json#/$defs/uint" },
+    "lease_hash": { "$ref": "common.schema.json#/$defs/hash_value" },
+    "journal_root_hash": {
+      "$ref": "common.schema.json#/$defs/hash_value",
+      "description": "Compatibility field used by the claim response; it is the journal root after the lease append."
+    }
+  },
+  "$defs": {
+    "runtime_budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Budget as serde emits it from Rust: optional ceilings are present as integer or null values.",
+      "required": [
+        "max_model_cents",
+        "max_tool_calls",
+        "max_wall_ms",
+        "max_payment_minor_units"
+      ],
+      "properties": {
+        "max_model_cents": {
+          "anyOf": [{ "$ref": "common.schema.json#/$defs/uint" }, { "type": "null" }]
+        },
+        "max_tool_calls": {
+          "anyOf": [{ "$ref": "common.schema.json#/$defs/uint" }, { "type": "null" }]
+        },
+        "max_wall_ms": {
+          "anyOf": [{ "$ref": "common.schema.json#/$defs/uint" }, { "type": "null" }]
+        },
+        "max_payment_minor_units": {
+          "anyOf": [{ "$ref": "common.schema.json#/$defs/uint" }, { "type": "null" }]
+        }
+      }
+    }
+  }
+}

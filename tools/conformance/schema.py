@@ -26,7 +26,7 @@ _DATE_TIME = re.compile(
 _SUPPORTED = {
     "$schema", "$id", "$defs", "$ref", "title", "description", "type",
     "properties", "required", "additionalProperties", "enum", "const",
-    "items", "oneOf", "allOf", "minimum", "maximum", "minItems", "minLength",
+    "items", "oneOf", "anyOf", "allOf", "minimum", "maximum", "minItems", "minLength",
     "maxLength", "maxProperties", "pattern", "format", "uniqueItems",
     "examples", "default",
 }
@@ -93,6 +93,18 @@ def _validate(inst, schema, cur_file, reg, path, errors) -> None:
                 collected.extend(sub_errors)
         if matches != 1:
             errors.append(f"{path}: matched {matches} of oneOf branches (expected exactly 1)")
+        return
+
+    if "anyOf" in schema:
+        collected: list[str] = []
+        for sub in schema["anyOf"]:
+            sub_errors: list[str] = []
+            _validate(inst, sub, cur_file, reg, path, sub_errors)
+            if not sub_errors:
+                return
+            collected.extend(sub_errors)
+        errors.append(f"{path}: matched 0 of anyOf branches (expected at least 1)")
+        errors.extend(collected)
         return
 
     if "const" in schema and inst != schema["const"]:

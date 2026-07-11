@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "runtime-execution-complete-response.schema.json",
+  "title": "RuntimeExecutionCompleteResponse",
+  "description": "HTTP/runtime response after the daemon appends a receipt through the exact open execution lease.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "session_id",
+    "action_id",
+    "lease_id",
+    "receipt_id",
+    "receipt_seq",
+    "receipt_hash",
+    "receipt_journal_seq",
+    "receipt_journal_hash",
+    "final_journal_root_hash"
+  ],
+  "properties": {
+    "session_id": { "type": "string", "minLength": 1 },
+    "action_id": { "type": "string", "minLength": 1 },
+    "lease_id": { "type": "string", "minLength": 1 },
+    "receipt_id": { "type": "string", "minLength": 1 },
+    "receipt_seq": { "$ref": "common.schema.json#/$defs/uint" },
+    "receipt_hash": { "$ref": "common.schema.json#/$defs/hash_value" },
+    "receipt_journal_seq": { "$ref": "common.schema.json#/$defs/uint" },
+    "receipt_journal_hash": { "$ref": "common.schema.json#/$defs/hash_value" },
+    "final_journal_root_hash": { "$ref": "common.schema.json#/$defs/hash_value" }
+  }
+}
