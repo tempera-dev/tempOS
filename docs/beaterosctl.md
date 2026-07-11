@@ -91,7 +91,12 @@ The body must include `grant_id` and `reviewer_id`, and may include
 when the action exists, its latest decision is `NeedsApproval`, the grant is
 both required by the action and issued in the session, and the approval time is
 not in the future. The response returns the approval journal seq/hash and, when
-`readmit` is true, the follow-up admission decision for the same manifest.
+`readmit` is true, the follow-up admission decision for the same manifest. The
+request and response shapes are published as
+`contracts/schema/runtime-approval-request.schema.json` and
+`contracts/schema/runtime-approval-response.schema.json`; the top-level
+`final_journal_root_hash` is the last append performed by the request, so it is
+the readmission decision hash when `readmit` is true.
 
 Callers may explicitly opt into supervised recovery before the loop runs:
 
