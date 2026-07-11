@@ -77,6 +77,8 @@ pub fn help_text() -> String {
          \x20 grant issue     --session <id> --resource-kind <kind> [--resource-id <id>]\n\
          \x20                 --actions <a,b> [--path-prefix <p>]... [--network-allow <h>]...\n\
          \x20                 [--max-risk <r>] [--expires-in-secs <n>]\n\
+         \x20                 [--approval-mode <none|human|multi_party>]\n\
+         \x20                 [--approval-threshold-risk <r>] [--reviewer <id>]...\n\
          \x20                 [--revocation-handle <h>] [--reason <text>]\n\
          \x20 grant revoke    --session <id> --grant-id <id> --reason <text>\n\
          \x20                 [--revoked-by <id>]\n\
@@ -108,8 +110,22 @@ pub fn help_text() -> String {
          \x20                 --resolution outcome_unknown --reason <text>\n\
          \x20                 [--reconciliation-id <id>] [--reconciled-by <id>]\n\
          \x20                 [--evidence <ref>]...\n\
+         \x20 approval record --session <id> --action <id> --grant-id <id>\n\
+         \x20                 --reviewer <id> [--review-id <id>] [--approved-at <rfc3339>]\n\
+         \x20                 [--readmit]\n\
          \x20 simulation record --session <id> --action <id>\n\
          \x20                 [--simulation-id <id>] [--scenario-id <id>]\n\
+         \x20 model-route choose --session <id> --routes-file <json> --request-file <json>\n\
+         \x20 memory record  --session <id> --memory-id <id> --source-event <id>\n\
+         \x20                --source-digest <digest> --kind <kind> --content-ref <ref>\n\
+         \x20                --summary <text> --sensitivity <data-class>\n\
+         \x20                --access-policy <policy> [--writer <id>] [--scope <scope>]\n\
+         \x20                [--confidence-basis-points <0..10000>]\n\
+         \x20                [--source-taint <t,..>] [--source-data-class <d,..>]\n\
+         \x20 memory context --session <id> [--scope <scope>] [--max-items <n>]\n\
+         \x20                [--max-rejections <n>] [--min-confidence-basis-points <0..10000>]\n\
+         \x20                [--allow-sensitivity <d,..>] [--deny-source-taint <t,..>]\n\
+         \x20                [--deny-source-data-class <d,..>] [--trusted-writer <id>]...\n\
          \x20 receipt record  --session <id> --action <id> [--status <s>] [--summary <text>]\n\
          \x20                 [--rail-receipt-hash <hex64>]\n\
          \x20                 [--settlement-status <submitted|settled|failed|canceled>]\n\

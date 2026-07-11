@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "runtime-memory-record-request.schema.json",
+  "title": "RuntimeMemoryRecordRequest",
+  "description": "HTTP/runtime request for recording one non-authoritative memory fact in a daemon session journal. The memory is bound to the session by the journal it is appended to.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["session_id", "memory"],
+  "properties": {
+    "session_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Must match the session id in /v1/sessions/<id>/memory/records."
+    },
+    "memory": { "$ref": "memory-record.schema.json" }
+  }
+}

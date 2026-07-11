@@ -49,6 +49,39 @@ coordination artifact, not a replacement for `final.md`.
 | 26 | `codex/mcp-stdio-gateway` | Add mediated MCP stdio gateway for agent adoption | minimal stdio MCP server exposing one local-shell tool through daemon admission, sandbox, leases, receipts, and bounded model-visible output | 25 |
 | A1 | `claude/multi-agent-pr-review-4cfv9t` | Add beater-os-audit independent verifier and trace viewer | offline independent journal/receipt re-verification, human-legible trace render, audit metrics, redaction-safe audit bundle, `beateros-audit` CLI | 1 |
 
+### Slice 26 Operator Contract
+
+Slice 26 is intentionally a narrow adoption gateway, not full MCP federation.
+The stdio MCP server exposes one local-shell tool and maps each tool call into
+the existing daemon-mediated local-shell lane:
+
+- Daemon admission remains the only policy decision point.
+- `Allowed` is not execution authority without a durable execution lease.
+- Sandbox execution, stdout/stderr caps, and receipt append stay on the existing
+  tool-gateway path.
+- The MCP result returns a bounded model-visible summary plus receipt, lease,
+  journal, and projection identifiers.
+- Tokens and credentials are never passed through from daemon config, MCP
+  clients, shell environment, or future provider integrations.
+- Remote MCP catalogs, OAuth delegation, and arbitrary remote tools remain out
+  of scope until they can be normalized into trusted local registry entries.
+
+The detailed operator surface is [docs/mcp-stdio-gateway.md](mcp-stdio-gateway.md).
+
+### Slice 14 Operator Contract
+
+The model-router slice is metadata-only and provider-agnostic. It adds
+`crates/beater-os-model-router` as a deterministic selector over trusted route
+metadata and session `ModelPolicy`; it does not call model providers, read
+provider credentials, or make model output authoritative.
+
+The router enforces route allowlists, `local_only`, explicit data-class
+sensitivity ceilings, provider retention class, canonical purpose, context and
+output token bounds, static p95 latency, and deterministic token-cost ceilings.
+Denied candidates are returned with structured reasons so future model-call
+journaling can record the route decision before any prompt data leaves the
+runtime boundary.
+
 ## Cross-Agent Coordination Log
 
 This section is the communication channel between agents working on this repo in

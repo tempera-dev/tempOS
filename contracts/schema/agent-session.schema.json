@@ -18,7 +18,10 @@
     "initial_capability_ids": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
     "budget": { "$ref": "common.schema.json#/$defs/budget" },
     "model_policy": { "$ref": "common.schema.json#/$defs/model_policy" },
-    "memory_scope": { "type": "string" },
+    "memory_scope": {
+      "type": ["string", "null"],
+      "description": "Optional memory namespace. Runtime memory-context selection defaults to this scope and rejects attempts to widen it."
+    },
     "journal_root": { "type": "string" },
     "status": { "$ref": "common.schema.json#/$defs/session_status" }
   }

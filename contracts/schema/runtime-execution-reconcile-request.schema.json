@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "runtime-execution-reconcile-request.schema.json",
+  "title": "RuntimeExecutionReconcileRequest",
+  "description": "HTTP/runtime request body for POST /v1/sessions/<session-id>/actions/<action-id>/claims/<lease-id>/reconcile. It closes an expired unresolved lease as outcome_unknown without creating a receipt.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["resolution", "reason"],
+  "properties": {
+    "resolution": { "$ref": "common.schema.json#/$defs/execution_lease_resolution" },
+    "reason": { "type": "string", "minLength": 1 },
+    "reconciliation_id": {
+      "anyOf": [{ "type": "string" }, { "type": "null" }],
+      "description": "Optional stable reconciliation id. When omitted or blank, the daemon derives reconcile-<lease-id>."
+    },
+    "reconciled_by": {
+      "anyOf": [{ "type": "string" }, { "type": "null" }],
+      "description": "Optional operator identity. When omitted or blank, the daemon uses the session creator."
+    },
+    "evidence_refs": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    }
+  }
+}

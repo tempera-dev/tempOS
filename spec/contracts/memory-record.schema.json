@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "memory-record.schema.json",
   "title": "MemoryRecord",
-  "description": "final.md 12.6 / contracts.rs MemoryRecord. Knowledge preserved with provenance. Invariants: memory has a source; memory has an access policy; memory can be invalidated (expiry / supersede); derived memory can be rebuilt from the journal. Note: confidence is expressed in basis points (0-10000) on the wire rather than a 0-1 float.",
+  "description": "final.md 12.6 / contracts.rs MemoryRecord. Knowledge preserved with provenance. Invariants: memory has a source; memory has an access policy; memory can be invalidated (expiry / supersede); derived memory can be rebuilt from the journal. Policy-safe context selection treats memory as non-authoritative evidence and filters by scope, explicit sensitivity allowlists, denied source taint/data classes, access policy, and source-event anchoring. Note: confidence is expressed in basis points (0-10000) on the wire rather than a 0-1 float.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -24,11 +24,29 @@
     "source_digest": { "type": "string", "minLength": 1 },
     "writer": { "$ref": "common.schema.json#/$defs/Identifier" },
     "created_at": { "$ref": "common.schema.json#/$defs/Timestamp" },
+    "scope": {
+      "oneOf": [
+        { "type": "string" },
+        { "type": "null" }
+      ]
+    },
     "kind": { "type": "string", "minLength": 1 },
     "content_ref": { "type": "string", "minLength": 1 },
     "summary": { "type": "string" },
     "confidence_basis_points": { "type": "integer", "minimum": 0, "maximum": 10000 },
     "sensitivity": { "$ref": "common.schema.json#/$defs/DataClass" },
+    "source_taint": {
+      "type": "array",
+      "items": { "$ref": "common.schema.json#/$defs/TaintLabel" },
+      "uniqueItems": true,
+      "default": []
+    },
+    "source_data_classes": {
+      "type": "array",
+      "items": { "$ref": "common.schema.json#/$defs/DataClass" },
+      "uniqueItems": true,
+      "default": []
+    },
     "expires_at": {
       "oneOf": [
         { "$ref": "common.schema.json#/$defs/Timestamp" },

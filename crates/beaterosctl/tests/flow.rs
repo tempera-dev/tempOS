@@ -563,6 +563,125 @@ fn payment_operator_flow_records_typed_receipt_end_to_end() {
 }
 
 #[test]
+fn approval_record_binds_evidence_and_can_readmit_same_manifest() {
+    let home = TempHome::new();
+    let h = home.as_str();
+    let session = "sess-approval-cli";
+
+    ok(
+        &h,
+        &[
+            "session",
+            "create",
+            "--session",
+            session,
+            "--agent",
+            "agent:runtime",
+            "--created-by",
+            "human:owner",
+            "--workspace",
+            "ws-deploy",
+            "--goal",
+            "deploy after approval",
+            "--initial-capability-id",
+            "grant-deploy",
+        ],
+    );
+    ok(
+        &h,
+        &[
+            "grant",
+            "issue",
+            "--session",
+            session,
+            "--grant-id",
+            "grant-deploy",
+            "--resource-kind",
+            "cloud_resource",
+            "--resource-id",
+            "prod",
+            "--actions",
+            "deploy",
+            "--max-risk",
+            "critical",
+            "--max-data-class",
+            "internal",
+            "--approval-mode",
+            "human",
+            "--approval-threshold-risk",
+            "high",
+            "--reviewer",
+            "human:reviewer",
+            "--reason",
+            "deployment grant",
+        ],
+    );
+
+    let first = ok(
+        &h,
+        &[
+            "action",
+            "propose",
+            "--session",
+            session,
+            "--action-id",
+            "act-deploy",
+            "--tool",
+            "tool:deploy",
+            "--kind",
+            "deploy",
+            "--target-kind",
+            "cloud_resource",
+            "--target",
+            "prod",
+            "--grants",
+            "grant-deploy",
+            "--risk",
+            "high",
+            "--side-effects",
+            "deployment",
+            "--summary",
+            "deploy production service",
+        ],
+    );
+    assert!(first.contains("NeedsApproval"), "{first}");
+
+    let approval = ok(
+        &h,
+        &[
+            "approval",
+            "record",
+            "--session",
+            session,
+            "--action",
+            "act-deploy",
+            "--grant-id",
+            "grant-deploy",
+            "--reviewer",
+            "human:reviewer",
+            "--review-id",
+            "review-deploy-1",
+            "--readmit",
+        ],
+    );
+    assert!(
+        approval.contains("recorded approval review-deploy-1"),
+        "{approval}"
+    );
+    assert!(
+        approval.contains("readmit:     NeedsSimulation"),
+        "approval readmission should advance to simulation gate:\n{approval}"
+    );
+
+    let exported = ok(&h, &["trace", "export", "--session", session]);
+    let json: serde_json::Value =
+        serde_json::from_str(&exported).expect("trace export should be JSON");
+    assert_eq!(json["approvals"][0]["review_id"], "review-deploy-1");
+    assert_eq!(json["approvals"][0]["action_id"], "act-deploy");
+    assert_eq!(json["approvals"][0]["grant_id"], "grant-deploy");
+}
+
+#[test]
 fn payment_spend_without_mandate_is_refused_before_append() {
     let home = TempHome::new();
     let h = home.as_str();
@@ -1457,11 +1576,224 @@ fn session_lifecycle_gates_new_authority_and_admission() {
 }
 
 #[test]
+fn memory_record_and_context_selects_policy_safe_json() {
+    let home = TempHome::new();
+    let h = home.as_str();
+    let session = "sess-memory-cli";
+
+    ok(
+        &h,
+        &[
+            "session",
+            "create",
+            "--session",
+            session,
+            "--agent",
+            "agent:memory",
+            "--workspace",
+            "ws-memory",
+            "--goal",
+            "serve bounded memory context",
+            "--memory-scope",
+            "scope:memory-cli",
+        ],
+    );
+
+    let selected = ok(
+        &h,
+        &[
+            "memory",
+            "record",
+            "--session",
+            session,
+            "--memory-id",
+            "mem-selected",
+            "--source-event",
+            session,
+            "--source-digest",
+            "sha256:selected",
+            "--kind",
+            "preference",
+            "--content-ref",
+            "memory://selected",
+            "--summary",
+            "Prefer small focused pull requests",
+            "--sensitivity",
+            "internal",
+            "--source-data-class",
+            "internal",
+            "--access-policy",
+            "runtime_context",
+            "--confidence-basis-points",
+            "9000",
+        ],
+    );
+    assert!(
+        selected.contains("recorded memory mem-selected"),
+        "{selected}"
+    );
+
+    let rejected = ok(
+        &h,
+        &[
+            "memory",
+            "record",
+            "--session",
+            session,
+            "--memory-id",
+            "mem-rejected",
+            "--source-event",
+            session,
+            "--source-digest",
+            "sha256:rejected",
+            "--kind",
+            "secret",
+            "--content-ref",
+            "memory://rejected",
+            "--summary",
+            "Scanner-safe secret fixture",
+            "--sensitivity",
+            "secret",
+            "--source-data-class",
+            "secret",
+            "--access-policy",
+            "operator_only",
+            "--confidence-basis-points",
+            "8000",
+        ],
+    );
+    assert!(
+        rejected.contains("recorded memory mem-rejected"),
+        "{rejected}"
+    );
+
+    let context = ok(
+        &h,
+        &[
+            "memory",
+            "context",
+            "--session",
+            session,
+            "--allow-sensitivity",
+            "public,internal",
+            "--deny-source-data-class",
+            "secret",
+            "--trusted-writer",
+            "agent:memory",
+            "--max-items",
+            "8",
+            "--max-rejections",
+            "8",
+        ],
+    );
+    let json: serde_json::Value =
+        serde_json::from_str(&context).expect("memory context should be JSON");
+    assert_eq!(json["session_id"], session);
+    assert_eq!(json["context"]["selected"][0]["memory_id"], "mem-selected");
+    assert_eq!(
+        json["context"]["selected"][0]["provenance"]["source_event_id"],
+        session
+    );
+    assert_eq!(
+        json["context"]["selection_policy"]["scope"],
+        "scope:memory-cli"
+    );
+    assert_eq!(
+        json["context"]["selection_policy"]["trusted_writers"][0],
+        "agent:memory"
+    );
+    assert_eq!(json["context"]["rejected"][0]["memory_id"], "mem-rejected");
+    let reasons = json["context"]["rejected"][0]["reasons"]
+        .as_array()
+        .expect("rejection reasons");
+    assert!(
+        reasons
+            .iter()
+            .any(|reason| reason == "sensitivity_not_allowed"),
+        "secret memory should be rejected by sensitivity allowlist: {context}"
+    );
+    assert!(
+        reasons
+            .iter()
+            .any(|reason| reason == "source_data_class_denied"),
+        "secret memory should be rejected by source data class denylist: {context}"
+    );
+    assert!(
+        json["journal_root_hash"]
+            .as_str()
+            .expect("journal root hash")
+            .len()
+            >= 64,
+        "memory context should expose journal anchoring: {context}"
+    );
+}
+
+#[test]
+fn memory_scope_mismatch_fails_closed() {
+    let home = TempHome::new();
+    let h = home.as_str();
+    let session = "sess-memory-scope";
+
+    ok(
+        &h,
+        &[
+            "session",
+            "create",
+            "--session",
+            session,
+            "--agent",
+            "agent:memory",
+            "--workspace",
+            "ws-memory",
+            "--goal",
+            "guard memory scope",
+            "--memory-scope",
+            "scope:allowed",
+        ],
+    );
+
+    let err = cli(
+        &h,
+        &[
+            "memory",
+            "record",
+            "--session",
+            session,
+            "--memory-id",
+            "mem-wrong-scope",
+            "--source-event",
+            session,
+            "--source-digest",
+            "sha256:wrong-scope",
+            "--kind",
+            "preference",
+            "--content-ref",
+            "memory://wrong-scope",
+            "--summary",
+            "Wrong scoped memory",
+            "--sensitivity",
+            "internal",
+            "--access-policy",
+            "runtime_context",
+            "--scope",
+            "scope:other",
+        ],
+    )
+    .expect_err("memory record scope mismatch must fail closed");
+    assert!(
+        matches!(err, CliError::Refused(ref message) if message.contains("does not match session memory_scope")),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn help_is_available() {
     let home = TempHome::new();
     let out = ok(&home.as_str(), &["help"]);
     assert!(out.contains("beaterosctl"));
     assert!(out.contains("session create"));
+    assert!(out.contains("memory record"));
+    assert!(out.contains("memory context"));
     assert!(out.contains("--revocation-handle <h>"));
     assert!(out.contains("--revoked-handle <h>"));
 }
@@ -2076,6 +2408,145 @@ fn path_prefix_grant_requires_existing_canonical_prefix() {
     .expect_err("missing path-prefix authority must fail closed");
     assert!(
         matches!(err, CliError::Runtime(_) | CliError::Io(_)),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn model_route_choose_uses_session_policy_and_json_route_metadata() {
+    let home = TempHome::new();
+    let h = home.as_str();
+    ok(
+        &h,
+        &[
+            "session",
+            "create",
+            "--session",
+            "sess-model-route",
+            "--agent",
+            "agent:model-route",
+            "--workspace",
+            "workspace:model-route",
+            "--goal",
+            "choose model route",
+        ],
+    );
+
+    let routes_path = home.path.join("routes.json");
+    let request_path = home.path.join("request.json");
+    let mismatch_request_path = home.path.join("request-mismatch.json");
+    let routes = serde_json::json!([
+        {
+            "route_id": "local/verifier",
+            "provider": "local",
+            "model": "verifier-small",
+            "model_version": "fixture",
+            "locality": "local",
+            "retention": "none",
+            "max_data_class": null,
+            "allowed_purposes": ["verifier"],
+            "pricing": {
+                "input_cents_per_million_tokens": 0,
+                "output_cents_per_million_tokens": 0
+            },
+            "p95_latency_ms": 40,
+            "max_context_tokens": 32000,
+            "max_output_tokens": 4096,
+            "supports_tools": false,
+            "supports_multimodal": false,
+            "enabled": true,
+            "notes": null
+        },
+        {
+            "route_id": "cloud/planner",
+            "provider": "frontier-cloud",
+            "model": "planner-large",
+            "model_version": "fixture",
+            "locality": "public_cloud",
+            "retention": "no_training",
+            "max_data_class": "internal",
+            "allowed_purposes": ["planner"],
+            "pricing": {
+                "input_cents_per_million_tokens": 300,
+                "output_cents_per_million_tokens": 1500
+            },
+            "p95_latency_ms": 900,
+            "max_context_tokens": 200000,
+            "max_output_tokens": 16384,
+            "supports_tools": true,
+            "supports_multimodal": true,
+            "enabled": true,
+            "notes": null
+        }
+    ]);
+    let request = serde_json::json!({
+        "session_id": "sess-model-route",
+        "purpose": "planner",
+        "data_classes": ["internal"],
+        "taint": [],
+        "estimated_input_tokens": 2000,
+        "max_output_tokens": 1000,
+        "latency_budget_ms": 2000,
+        "max_estimated_cents": 10,
+        "required_local": false,
+        "required_tools": false,
+        "required_multimodal": false,
+        "max_retention": "no_training",
+        "allowed_routes": [],
+        "denied_routes": [],
+        "reason": "test route choice"
+    });
+    let mismatch_request = serde_json::json!({
+        "session_id": "other-session",
+        "purpose": "planner",
+        "data_classes": ["internal"],
+        "taint": [],
+        "estimated_input_tokens": 2000,
+        "max_output_tokens": 1000,
+        "max_retention": "no_training"
+    });
+    std::fs::write(&routes_path, serde_json::to_vec_pretty(&routes).unwrap()).unwrap();
+    std::fs::write(&request_path, serde_json::to_vec_pretty(&request).unwrap()).unwrap();
+    std::fs::write(
+        &mismatch_request_path,
+        serde_json::to_vec_pretty(&mismatch_request).unwrap(),
+    )
+    .unwrap();
+
+    let output = ok(
+        &h,
+        &[
+            "model-route",
+            "choose",
+            "--session",
+            "sess-model-route",
+            "--routes-file",
+            routes_path.to_str().unwrap(),
+            "--request-file",
+            request_path.to_str().unwrap(),
+        ],
+    );
+    let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
+    assert_eq!(parsed["decision"]["result"], "allowed");
+    assert_eq!(parsed["decision"]["selected"]["route_id"], "cloud/planner");
+    assert_eq!(parsed["projection"]["receipts"], 0);
+
+    let err = cli(
+        &h,
+        &[
+            "model-route",
+            "choose",
+            "--session",
+            "sess-model-route",
+            "--routes-file",
+            routes_path.to_str().unwrap(),
+            "--request-file",
+            mismatch_request_path.to_str().unwrap(),
+        ],
+    )
+    .expect_err("mismatched route request session must fail closed");
+    assert!(
+        matches!(err, CliError::Refused(_)),
         "unexpected error: {err}"
     );
 }

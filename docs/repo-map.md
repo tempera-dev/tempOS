@@ -15,6 +15,11 @@ review boundaries.
 - `crates/beater-osd`
   - Runtime daemon store, admission boundary, projection, receipt append path.
   - Durable session budget replay for tool-call and wall-clock runtime quotas.
+  - Daemon-recorded human approval evidence via `Store::record_approval`.
+    `ApprovalRecorded` events are action-bound admission evidence, bound to
+    `action_id`, `manifest_hash`, `grant_id`, `reviewer_id`, `approved_at`,
+    and `policy_version`, and can unblock later re-admission without
+    fabricating a receipt or proving any side effect occurred.
   - Durable execution leases between `Allowed` policy decisions and spawned
     side-effecting tools; unresolved open leases are projected as recovery
     blockers and prevent blind replay, new admission, and session resume after
@@ -25,12 +30,17 @@ review boundaries.
   - Store-owned claimable execution-action projection so scheduler workers get
     manifest hash, decision id, target, budget, grants, and pinned tool
     version/digest from the daemon authority instead of re-deriving lossy state.
+  - Store-owned memory context selection loads and verifies the journal under
+    the session lock, projects `MemoryWritten` records through
+    `beater-os-memory`, and returns selected/rejected context with journal root
+    evidence.
   - Canonical proof of authority writes (`PolicyEngine` is only invocation point
     for admission decisions).
 - `crates/beater-osd-http`
   - Loopback HTTP control-plane binary over `beater-osd` and the tool gateway,
     including token-gated local shell execution, hosted runtime bundle
-    submission, and scheduler execution-lease claim/completion routes.
+    submission, metadata-only model-route selection, action-bound approval
+    recording, and scheduler execution-lease claim/completion routes.
   - Worker preflight route returns a side-effect-free scheduler plan before
     execution: wait on a live lease, recover an expired lease, dispatch a
     matching runnable action, idle, or report that runnable work does not match
@@ -53,8 +63,22 @@ review boundaries.
     action only when the journal projection proves it has no receipt, open
     execution lease, or outcome-unknown reconciliation; the daemon execution
     lease remains the atomic worker claim.
+  - `POST /v1/sessions/<id>/model-routes/choose` uses the server-started
+    `--model-route-catalog` as trusted route metadata, accepts only `session_id`
+    plus a proposed call request in the HTTP body, rejects path/body session
+    mismatches, and returns `RuntimeModelRouteOutcome` without provider I/O.
+  - `POST /v1/sessions/<id>/memory/context/select` accepts
+    `RuntimeMemoryContextRequest`, rejects path/body session mismatches, and
+    returns bounded, source-anchored `RuntimeMemoryContextOutcome` context
+    without creating grants, approvals, model routes, receipts, or trusted
+    instructions.
+  - `POST /v1/sessions/<id>/memory/records` records one non-authoritative
+    `MemoryWritten` event through the daemon boundary, requiring path/body
+    session match, running-session state, session memory-scope compatibility,
+    and journal-validated source-event anchoring.
 - `crates/beaterosctl`
-  - Operator CLI for session/grant/manifests/receipts.
+  - Operator CLI for session/grant/manifests/receipts, including trace
+    projection/export of daemon-recorded approvals.
 
 ## 2) Service planes (runtime depends on these contracts)
 
@@ -63,6 +87,17 @@ review boundaries.
     normalization, and side-effect evidence constraints.
 - `crates/beater-os-memory`
   - Memory and provenance surface on top of session/journal evidence.
+  - Policy-safe context selection must use active, non-expired records whose
+    source event/digest provenance is anchored in projected journal records,
+    enforce access policy, explicit sensitivity allowlists, denied source
+    taint/data classes, optional trusted-writer filters, and bounded output, and
+    surface memory only as non-authoritative context for models/tools.
+- `crates/beater-os-model-router`
+  - Model route selection over `ModelPolicy`, data-class ceilings, route
+    locality, provider retention, purpose, latency, and token-cost metadata.
+  - Service-plane adapter only: it issues no grants, does not make model output
+    authoritative, and does not weaken daemon admission, journal, receipt, or
+    audit boundaries.
 - `crates/beater-os-tool-registry`
   - Tool schema registry, tool risk metadata, and execution manifest binding.
 - `crates/beater-os-tool-gateway`
@@ -76,10 +111,29 @@ review boundaries.
     releases the lock while sandbox execution runs, then reacquires it only for
     exact lease-id receipt completion so local lifecycle controls are not
     serialized behind blocking tool work.
+- `crates/beater-os-mcp`
+  - MCP stdio adoption gateway exposing exactly one model-facing tool,
+    `tempos.local_shell`, over the existing daemon admission, tool gateway,
+    sandbox, execution-lease, receipt, bounded-output, and compact-summary path.
+  - The crate is a transport adapter, not a new authority boundary: it creates
+    no grants, forwards no daemon/MCP/provider/shell credentials, canonicalizes
+    cwd before admission, and requires explicit existing grant ids per call.
 - `crates/beater-os-runtime`
   - Typed agent runtime loop over the daemon store: session bootstrap, bounded
     grant issuance, sequential step admission, and no-side-effect observation
     receipts.
+  - Runtime model-route selection projects the daemon session, applies the
+    daemon-projected session `ModelPolicy` to trusted
+    `beater-os-model-router` route metadata, and returns
+    `RuntimeModelRouteOutcome` route decision evidence after journaling
+    `ModelRouteDecided`; it performs no provider I/O.
+  - Runtime memory context selection enforces running-session state and
+    `AgentSession.memory_scope`, delegates source-anchored selection to the
+    daemon store, and returns `RuntimeMemoryContextOutcome` without mutating the
+    journal.
+  - Runtime admission consumes daemon-projected approvals recorded through
+    `Store::record_approval`, so action-bound approval evidence can unblock
+    re-admission without bypassing policy or creating receipts.
   - Bounded `beater-os-runtime-worker supervise-local-shell` service binary that
     repeatedly runs the supervised local-shell cycle without direct store
     mutation authority: expired open leases are reconciled as `outcome_unknown`,
@@ -166,6 +220,11 @@ review boundaries.
     lease-id completion after original short expiry, live-lease reconcile
     refusal, expired-lease heartbeat refusal, expired-lease `outcome_unknown`
     reconciliation, and journal verification.
+- `scripts/run-beater-os-mcp-stdio-gateway-smoke.py`
+  - MCP stdio proof that an MCP-speaking client can initialize, list the single
+    `tempos.local_shell` tool, call it through daemon admission and the
+    local-shell gateway path, receive bounded model-visible output, and
+    leave a durable receipt-backed side effect.
 - `scripts/local-e2e.py`
   - Aggregate gate when doing full lane validation locally.
 
@@ -175,6 +234,16 @@ review boundaries.
   - Product and architecture intent. **Do not shorten or weaken.**
 - `docs/architecture-runtime-to-metal-path.md`
   - Execution contract for moving from runtime into optional metal lanes.
+- `docs/mcp-stdio-gateway.md`
+  - Operator-facing contract for the first MCP stdio adoption gateway: one
+    local-shell tool, daemon admission, sandbox execution, durable leases,
+    receipts, bounded output, no token passthrough, and model-visible
+    summaries.
+- `docs/memory-context.md`
+  - Policy-facing memory context service surface: active/non-expired,
+    source-record anchored, access-policy filtered, explicit sensitivity
+    allowlist, denied source taint/data classes, optional trusted-writer
+    filter, bounded, and non-authoritative.
 - `docs/engineering/bare-metal-readiness-manifest.json`
   - Source-of-truth lane graph, profiles, and workload classes.
 - `docs/engineering/bare-metal-readiness.md`
@@ -184,6 +253,9 @@ review boundaries.
 - `contracts/schema/worker-preflight-plan.schema.json`
   - Model/runner-facing schema for the side-effect-free scheduler plan that
     precedes lease claims and local-shell worker dispatch.
+- `contracts/schema/model-route-decision.schema.json`
+  - Journalable model-router decision schema for metadata-only route selection
+    before prompt data crosses a provider boundary.
 - `docs/implementation-backlog.md`
   - Slice assignments, sequencing, and ownership.
 - `docs/governance/review-checklist.md`

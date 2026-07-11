@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "runtime-execution-complete-request.schema.json",
+  "title": "RuntimeExecutionCompleteRequest",
+  "description": "HTTP/runtime request body for POST /v1/sessions/<session-id>/actions/<action-id>/claims/<lease-id>/complete. This is CapabilityReceiptInput, before daemon assignment of receipt seq and receipt-chain hashes.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "action_id",
+    "tool_id",
+    "target",
+    "started_at",
+    "finished_at",
+    "status",
+    "input_digest",
+    "output_digest",
+    "side_effect_summary"
+  ],
+  "properties": {
+    "receipt_id": {
+      "anyOf": [{ "type": "string", "minLength": 1 }, { "type": "null" }]
+    },
+    "action_id": { "type": "string", "minLength": 1 },
+    "tool_id": { "type": "string", "minLength": 1 },
+    "target": { "$ref": "common.schema.json#/$defs/capability_selector" },
+    "started_at": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "finished_at": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "status": { "type": "string", "minLength": 1 },
+    "input_digest": { "type": "string", "minLength": 1 },
+    "output_digest": { "type": "string", "minLength": 1 },
+    "side_effect_summary": { "type": "string" },
+    "side_effects": {
+      "type": "array",
+      "items": { "$ref": "common.schema.json#/$defs/side_effect_class" }
+    },
+    "external_ids": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "artifact_refs": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "payment_receipt": {
+      "anyOf": [{ "$ref": "#/$defs/payment_receipt_input" }, { "type": "null" }]
+    }
+  },
+  "$defs": {
+    "payment_receipt_input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "manifest_hash",
+        "mandate_id",
+        "rail",
+        "adapter_id",
+        "asset",
+        "amount_minor_units",
+        "counterparty_ref",
+        "counterparty_binding_hash",
+        "purpose",
+        "payment_idempotency_key",
+        "envelope_format",
+        "envelope_hash",
+        "rail_receipt_hash",
+        "settlement_status"
+      ],
+      "properties": {
+        "manifest_hash": { "$ref": "common.schema.json#/$defs/hash_value" },
+        "mandate_id": { "type": "string", "minLength": 1 },
+        "rail": { "type": "string", "minLength": 1 },
+        "adapter_id": { "type": "string", "minLength": 1 },
+        "adapter_version": {
+          "anyOf": [{ "type": "string", "minLength": 1 }, { "type": "null" }]
+        },
+        "asset": { "type": "string", "minLength": 1 },
+        "amount_minor_units": { "$ref": "common.schema.json#/$defs/uint" },
+        "counterparty_ref": { "type": "string", "minLength": 1 },
+        "counterparty_binding_hash": { "$ref": "common.schema.json#/$defs/hash_value" },
+        "purpose": { "type": "string", "minLength": 1 },
+        "payment_idempotency_key": { "type": "string", "minLength": 1 },
+        "envelope_format": { "type": "string", "minLength": 1 },
+        "envelope_hash": { "$ref": "common.schema.json#/$defs/hash_value" },
+        "rail_receipt_hash": { "$ref": "common.schema.json#/$defs/hash_value" },
+        "settlement_status": { "enum": ["submitted", "settled", "failed", "canceled"] },
+        "settled_at": {
+          "anyOf": [{ "$ref": "common.schema.json#/$defs/timestamp" }, { "type": "null" }]
+        }
+      }
+    }
+  }
+}

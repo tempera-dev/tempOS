@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "memory-context-request.schema.json",
+  "title": "MemoryContextRequest",
+  "description": "Runtime selector policy for bounded, non-authoritative memory context. Omitted policy uses safe runtime defaults: public/internal sensitivity allowlist, source-record anchoring required, redacted records excluded, content refs omitted, selected items capped, and structured rejections capped.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "scope": {
+      "oneOf": [
+        { "type": "string" },
+        { "type": "null" }
+      ],
+      "description": "Optional memory scope. Runtime session memory_scope defaults or constrains this value."
+    },
+    "max_items": {
+      "oneOf": [
+        { "type": "integer", "minimum": 0 },
+        { "type": "null" }
+      ],
+      "default": 16
+    },
+    "max_rejections": {
+      "oneOf": [
+        { "type": "integer", "minimum": 0 },
+        { "type": "null" }
+      ],
+      "default": 64
+    },
+    "min_confidence_basis_points": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10000,
+      "default": 0
+    },
+    "allowed_sensitivities": {
+      "type": "array",
+      "items": { "$ref": "common.schema.json#/$defs/data_class" },
+      "uniqueItems": true,
+      "default": ["public", "internal"],
+      "description": "Explicit allowlist. An explicitly empty array means all sensitivity labels are allowed."
+    },
+    "denied_source_taint": {
+      "type": "array",
+      "items": { "$ref": "common.schema.json#/$defs/taint_label" },
+      "uniqueItems": true,
+      "default": []
+    },
+    "denied_source_data_classes": {
+      "type": "array",
+      "items": { "$ref": "common.schema.json#/$defs/data_class" },
+      "uniqueItems": true,
+      "default": []
+    },
+    "allowed_kinds": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true,
+      "default": []
+    },
+    "allowed_access_policies": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true,
+      "default": []
+    },
+    "trusted_writers": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true,
+      "default": []
+    },
+    "include_redacted": { "type": "boolean", "default": false },
+    "include_content_refs": { "type": "boolean", "default": false },
+    "require_verified_source": { "type": "boolean", "default": true }
+  }
+}

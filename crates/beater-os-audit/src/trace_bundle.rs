@@ -292,7 +292,8 @@ fn project_trace_from_journal(records: &[JournalRecord]) -> Result<ProjectedTrac
                 projected.simulations.push(simulation.clone());
             }
             JournalEvent::ReceiptAppended { receipt } => projected.receipts.push(receipt.clone()),
-            JournalEvent::MemoryWritten { .. }
+            JournalEvent::ModelRouteDecided { .. }
+            | JournalEvent::MemoryWritten { .. }
             | JournalEvent::ScenarioEvaluated { .. }
             | JournalEvent::IncidentAnnotated { .. } => {}
         }

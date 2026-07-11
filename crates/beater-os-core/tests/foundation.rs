@@ -5,9 +5,9 @@ use beater_os_core::{
     ApprovalRequirement, BeaterOsError, Budget, CapabilityGrant, CapabilityReceipt,
     CapabilityReceiptInput, CapabilityScope, CapabilitySelector, DataClass, DecisionResult,
     DelegationMode, GrantConstraints, HashValue, InMemoryJournal, JournalEvent, MemoryRecord,
-    PaymentIntent, PaymentMandate, PaymentReceiptEvidence, PaymentSettlementStatus, PolicyDecision,
-    PolicyEngine, ReceiptLedger, ResourceKind, RiskClass, SessionStatus, SideEffectClass,
-    SimulationEvidence, TaintLabel, ToolManifest, hash_json,
+    ModelRouteDecisionRecord, PaymentIntent, PaymentMandate, PaymentReceiptEvidence,
+    PaymentSettlementStatus, PolicyDecision, PolicyEngine, ReceiptLedger, ResourceKind, RiskClass,
+    SessionStatus, SideEffectClass, SimulationEvidence, TaintLabel, ToolManifest, hash_json,
 };
 use chrono::{Duration, TimeZone, Utc};
 use serde::Serialize;
@@ -1672,6 +1672,29 @@ fn journal_rejects_decision_for_stale_manifest_hash() -> Result<(), Box<dyn std:
 }
 
 #[test]
+fn model_route_decision_record_defaults_compact_denials() -> Result<(), Box<dyn std::error::Error>>
+{
+    let now = fixed_time().to_rfc3339();
+    let record: ModelRouteDecisionRecord = serde_json::from_value(serde_json::json!({
+        "decision_id": "1111111111111111111111111111111111111111111111111111111111111111",
+        "session_id": "session-1",
+        "result": "denied",
+        "request_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "catalog_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "policy_hash": "4444444444444444444444444444444444444444444444444444444444444444",
+        "decision_payload_hash": "5555555555555555555555555555555555555555555555555555555555555555",
+        "requested_at": now,
+        "recorded_at": now
+    }))?;
+
+    assert_eq!(record.selected_route_id, None);
+    assert_eq!(record.selected_route_hash, None);
+    assert!(record.candidate_route_ids.is_empty());
+    assert!(record.rejected_route_ids.is_empty());
+    Ok(())
+}
+
+#[test]
 fn journal_accepts_legal_session_status_transition() -> Result<(), Box<dyn std::error::Error>> {
     let now = fixed_time();
     let mut journal = InMemoryJournal::new();
@@ -1823,11 +1846,14 @@ fn memory_record(
         source_digest: format!("sha256:{source_event_id}"),
         writer: "agent:beater-os".to_string(),
         created_at: now,
+        scope: None,
         kind: "summary".to_string(),
         content_ref: format!("memory://{memory_id}"),
         summary: "derived from a journaled source".to_string(),
         confidence_basis_points: 9_000,
         sensitivity: DataClass::Internal,
+        source_taint: Default::default(),
+        source_data_classes: Default::default(),
         expires_at: None,
         access_policy: "session".to_string(),
     }
@@ -2131,6 +2157,30 @@ fn journal_rejects_memory_with_unknown_source_event() -> Result<(), Box<dyn std:
         panic!("expected journal causality error");
     };
     assert!(reason.contains("unknown source event"));
+    Ok(())
+}
+
+#[test]
+fn journal_rejects_memory_confidence_above_basis_point_ceiling()
+-> Result<(), Box<dyn std::error::Error>> {
+    let now = fixed_time();
+    let mut journal = InMemoryJournal::new();
+    journal.append(
+        JournalEvent::IncidentAnnotated {
+            incident_id: "source-1".to_string(),
+            note: "source event".to_string(),
+        },
+        now,
+    )?;
+    let mut memory = memory_record("mem-1", "source-1", now);
+    memory.confidence_basis_points = 10_001;
+    let err = journal
+        .append(JournalEvent::MemoryWritten { memory }, now)
+        .err();
+    let Some(BeaterOsError::JournalCausality { reason, .. }) = err else {
+        panic!("expected journal causality error");
+    };
+    assert!(reason.contains("confidence_basis_points exceeds 10000"));
     Ok(())
 }
 

@@ -142,6 +142,7 @@
         "active_grants",
         "actions",
         "decisions",
+        "model_route_decisions",
         "pending_allowed_actions",
         "pending_allowed_action_ids",
         "runnable_pending_actions",
@@ -165,6 +166,7 @@
         "active_grants": { "$ref": "common.schema.json#/$defs/uint" },
         "actions": { "$ref": "common.schema.json#/$defs/uint" },
         "decisions": { "$ref": "common.schema.json#/$defs/uint" },
+        "model_route_decisions": { "$ref": "common.schema.json#/$defs/uint" },
         "pending_allowed_actions": { "$ref": "common.schema.json#/$defs/uint" },
         "pending_allowed_action_ids": {
           "type": "array",

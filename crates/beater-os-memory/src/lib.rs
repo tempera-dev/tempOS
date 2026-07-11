@@ -70,12 +70,14 @@
 //! assert!(projection.is_empty());
 //! ```
 
-use std::collections::BTreeMap;
+use std::cmp::Reverse;
 use std::collections::btree_map::Entry;
+use std::collections::{BTreeMap, BTreeSet};
 
-use beater_os_core::{DataClass, MemoryRecord};
+use beater_os_core::{DataClass, MemoryRecord, TaintLabel};
 use beater_os_core::{HashValue, InMemoryJournal, JournalEvent, JournalRecord, JournalSnapshot};
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 
 /// Default replacement text substituted for a redacted memory's `content_ref`
 /// and `summary` when a [`RedactionDirective`] supplies no explicit replacement.
@@ -142,7 +144,7 @@ impl RedactionDirective {
 /// provenance"): where it came from, who wrote it, and the exact journal record
 /// that recorded it. Every [`ProjectedMemory`] has one; a memory without a
 /// journaled source is impossible by construction.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MemoryProvenance {
     /// The memory this provenance describes.
     pub memory_id: String,
@@ -156,6 +158,14 @@ pub struct MemoryProvenance {
     pub journal_seq: u64,
     /// Hash of that journal record — anchors the memory into the hash chain.
     pub journal_record_hash: HashValue,
+    /// `seq` of the journal event named by `source_event_id`, when present in
+    /// the projected record set.
+    #[serde(default)]
+    pub source_journal_seq: Option<u64>,
+    /// Hash of the journal event named by `source_event_id`, when present in
+    /// the projected record set.
+    #[serde(default)]
+    pub source_record_hash: Option<HashValue>,
     /// When the memory was written (`MemoryRecord::created_at`).
     pub created_at: DateTime<Utc>,
 }
@@ -285,6 +295,367 @@ impl MemoryProjection {
             .filter(|m| m.record.sensitivity == sensitivity)
             .count()
     }
+
+    /// Select bounded, provenance-carrying memories for model/runtime context.
+    ///
+    /// This is the policy-facing context view. It never treats memory as
+    /// authority: selected items are evidence with provenance and explicit
+    /// warnings, while every excluded active/expired item gets a structured
+    /// rejection reason for audit and prompt-debugging.
+    pub fn select_context(&self, request: &MemoryContextRequest) -> MemoryContextSelection {
+        let mut accepted = Vec::new();
+        let mut rejected = Vec::new();
+        let max_items = request.max_items.unwrap_or(DEFAULT_MEMORY_CONTEXT_LIMIT);
+        let max_rejections = request
+            .max_rejections
+            .unwrap_or(DEFAULT_MEMORY_CONTEXT_REJECTION_LIMIT);
+        let mut truncated_rejections = 0;
+
+        for memory in self.audit_view() {
+            let reasons = memory_context_rejection_reasons(memory, request);
+            if reasons.is_empty() {
+                accepted.push(memory);
+            } else if rejected.len() < max_rejections {
+                rejected.push(MemoryContextRejection {
+                    memory_id: memory.record.memory_id.clone(),
+                    reasons,
+                    provenance: memory.provenance.clone(),
+                });
+            } else {
+                truncated_rejections += 1;
+            }
+        }
+
+        accepted.sort_by_key(|memory| {
+            (
+                Reverse(memory.record.confidence_basis_points),
+                Reverse(memory.record.created_at.timestamp_millis()),
+                memory.record.memory_id.clone(),
+            )
+        });
+        let truncated = accepted.len().saturating_sub(max_items);
+        let selected = accepted
+            .into_iter()
+            .take(max_items)
+            .map(|memory| MemoryContextItem {
+                memory_id: memory.record.memory_id.clone(),
+                scope: memory.record.scope.clone(),
+                kind: memory.record.kind.clone(),
+                content_ref: if request.include_content_refs {
+                    Some(memory.record.content_ref.clone())
+                } else {
+                    None
+                },
+                summary: memory.record.summary.clone(),
+                confidence_basis_points: memory.record.confidence_basis_points,
+                sensitivity: memory.record.sensitivity,
+                source_taint: memory.record.source_taint.clone(),
+                source_data_classes: memory.record.source_data_classes.clone(),
+                access_policy: memory.record.access_policy.clone(),
+                provenance: memory.provenance.clone(),
+                warnings: memory_context_warnings(memory, request),
+            })
+            .collect();
+
+        MemoryContextSelection {
+            projected_at: self.projected_at,
+            selected,
+            rejected,
+            truncated,
+            truncated_rejections,
+            selection_policy: request.summary(),
+        }
+    }
+}
+
+/// Default upper bound for context memories when a request does not specify one.
+pub const DEFAULT_MEMORY_CONTEXT_LIMIT: usize = 16;
+/// Default upper bound for structured context rejections returned to callers.
+pub const DEFAULT_MEMORY_CONTEXT_REJECTION_LIMIT: usize = 64;
+
+/// Request for a bounded, policy-filtered memory context view.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MemoryContextRequest {
+    /// Optional memory scope. When set, only records with the same
+    /// `MemoryRecord::scope` are selectable.
+    #[serde(default)]
+    pub scope: Option<String>,
+    /// Maximum number of selected context items. `None` uses
+    /// [`DEFAULT_MEMORY_CONTEXT_LIMIT`].
+    #[serde(default)]
+    pub max_items: Option<usize>,
+    /// Maximum number of structured rejections to retain in the returned
+    /// selection. `None` uses [`DEFAULT_MEMORY_CONTEXT_REJECTION_LIMIT`].
+    #[serde(default)]
+    pub max_rejections: Option<usize>,
+    /// Minimum confidence required to select a memory. Defaults to zero.
+    #[serde(default)]
+    pub min_confidence_basis_points: u16,
+    /// Explicit sensitivity allowlist. Empty means all sensitivities are allowed.
+    /// This is deliberately not a linear ceiling over `DataClass`.
+    #[serde(default = "default_allowed_memory_sensitivities")]
+    pub allowed_sensitivities: BTreeSet<DataClass>,
+    /// Source taint labels that must be excluded from selected context.
+    #[serde(default)]
+    pub denied_source_taint: BTreeSet<TaintLabel>,
+    /// Source data classes that must be excluded from selected context.
+    #[serde(default)]
+    pub denied_source_data_classes: BTreeSet<DataClass>,
+    /// Optional allowlist of memory `kind` values.
+    #[serde(default)]
+    pub allowed_kinds: BTreeSet<String>,
+    /// Optional allowlist of `access_policy` values.
+    #[serde(default)]
+    pub allowed_access_policies: BTreeSet<String>,
+    /// Optional allowlist of writers trusted for this context use.
+    #[serde(default)]
+    pub trusted_writers: BTreeSet<String>,
+    /// Whether redacted memories may appear as placeholder summaries. Defaults
+    /// false because placeholders are usually not useful context.
+    #[serde(default)]
+    pub include_redacted: bool,
+    /// Whether `content_ref` is included in selected items. Defaults false so
+    /// model-facing context can carry summaries/provenance without extra
+    /// dereference capability.
+    #[serde(default)]
+    pub include_content_refs: bool,
+    /// Require the source event named by `source_event_id` to be present in the
+    /// projected record set and anchored by seq/hash. Defaults true so raw,
+    /// partial record vectors cannot silently become model context.
+    #[serde(default = "default_require_verified_source")]
+    pub require_verified_source: bool,
+}
+
+impl Default for MemoryContextRequest {
+    fn default() -> Self {
+        Self {
+            max_items: Some(DEFAULT_MEMORY_CONTEXT_LIMIT),
+            max_rejections: Some(DEFAULT_MEMORY_CONTEXT_REJECTION_LIMIT),
+            min_confidence_basis_points: 0,
+            scope: None,
+            allowed_sensitivities: default_allowed_memory_sensitivities(),
+            denied_source_taint: BTreeSet::new(),
+            denied_source_data_classes: BTreeSet::new(),
+            allowed_kinds: BTreeSet::new(),
+            allowed_access_policies: BTreeSet::new(),
+            trusted_writers: BTreeSet::new(),
+            include_redacted: false,
+            include_content_refs: false,
+            require_verified_source: default_require_verified_source(),
+        }
+    }
+}
+
+impl MemoryContextRequest {
+    fn summary(&self) -> MemoryContextPolicySummary {
+        MemoryContextPolicySummary {
+            max_items: self.max_items.unwrap_or(DEFAULT_MEMORY_CONTEXT_LIMIT),
+            max_rejections: self
+                .max_rejections
+                .unwrap_or(DEFAULT_MEMORY_CONTEXT_REJECTION_LIMIT),
+            min_confidence_basis_points: self.min_confidence_basis_points,
+            scope: self.scope.clone(),
+            allowed_sensitivities: self.allowed_sensitivities.clone(),
+            denied_source_taint: self.denied_source_taint.clone(),
+            denied_source_data_classes: self.denied_source_data_classes.clone(),
+            allowed_kinds: self.allowed_kinds.clone(),
+            allowed_access_policies: self.allowed_access_policies.clone(),
+            trusted_writers: self.trusted_writers.clone(),
+            include_redacted: self.include_redacted,
+            include_content_refs: self.include_content_refs,
+            require_verified_source: self.require_verified_source,
+        }
+    }
+}
+
+fn default_require_verified_source() -> bool {
+    true
+}
+
+fn default_allowed_memory_sensitivities() -> BTreeSet<DataClass> {
+    BTreeSet::from([DataClass::Public, DataClass::Internal])
+}
+
+fn default_memory_context_limit_value() -> usize {
+    DEFAULT_MEMORY_CONTEXT_LIMIT
+}
+
+fn default_memory_context_rejection_limit_value() -> usize {
+    DEFAULT_MEMORY_CONTEXT_REJECTION_LIMIT
+}
+
+/// Serializable result of selecting memory context.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemoryContextSelection {
+    pub projected_at: DateTime<Utc>,
+    pub selected: Vec<MemoryContextItem>,
+    pub rejected: Vec<MemoryContextRejection>,
+    pub truncated: usize,
+    #[serde(default)]
+    pub truncated_rejections: usize,
+    pub selection_policy: MemoryContextPolicySummary,
+}
+
+/// One memory selected for context. This is evidence, not authority.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemoryContextItem {
+    pub memory_id: String,
+    #[serde(default)]
+    pub scope: Option<String>,
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_ref: Option<String>,
+    pub summary: String,
+    pub confidence_basis_points: u16,
+    pub sensitivity: DataClass,
+    #[serde(default)]
+    pub source_taint: BTreeSet<TaintLabel>,
+    #[serde(default)]
+    pub source_data_classes: BTreeSet<DataClass>,
+    pub access_policy: String,
+    pub provenance: MemoryProvenance,
+    #[serde(default)]
+    pub warnings: Vec<MemoryContextWarning>,
+}
+
+/// A memory excluded from context, with audit-visible reasons.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemoryContextRejection {
+    pub memory_id: String,
+    pub reasons: Vec<MemoryContextRejectReason>,
+    pub provenance: MemoryProvenance,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemoryContextPolicySummary {
+    #[serde(default = "default_memory_context_limit_value")]
+    pub max_items: usize,
+    #[serde(default = "default_memory_context_rejection_limit_value")]
+    pub max_rejections: usize,
+    pub min_confidence_basis_points: u16,
+    #[serde(default)]
+    pub scope: Option<String>,
+    #[serde(default = "default_allowed_memory_sensitivities")]
+    pub allowed_sensitivities: BTreeSet<DataClass>,
+    #[serde(default)]
+    pub denied_source_taint: BTreeSet<TaintLabel>,
+    #[serde(default)]
+    pub denied_source_data_classes: BTreeSet<DataClass>,
+    #[serde(default)]
+    pub allowed_kinds: BTreeSet<String>,
+    #[serde(default)]
+    pub allowed_access_policies: BTreeSet<String>,
+    #[serde(default)]
+    pub trusted_writers: BTreeSet<String>,
+    pub include_redacted: bool,
+    pub include_content_refs: bool,
+    #[serde(default = "default_require_verified_source")]
+    pub require_verified_source: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MemoryContextRejectReason {
+    Expired,
+    Redacted,
+    ConfidenceTooLow,
+    ScopeMismatch,
+    SensitivityNotAllowed,
+    SourceTaintDenied,
+    SourceDataClassDenied,
+    KindNotAllowed,
+    AccessPolicyNotAllowed,
+    WriterNotTrusted,
+    SourceRecordMissing,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MemoryContextWarning {
+    MemoryIsContextNotAuthority,
+    WriterTrustNotConstrained,
+    ContentRefOmitted,
+}
+
+fn memory_context_rejection_reasons(
+    memory: &ProjectedMemory,
+    request: &MemoryContextRequest,
+) -> Vec<MemoryContextRejectReason> {
+    let mut reasons = BTreeSet::new();
+    if memory.is_expired() {
+        reasons.insert(MemoryContextRejectReason::Expired);
+    }
+    if memory.is_redacted() && !request.include_redacted {
+        reasons.insert(MemoryContextRejectReason::Redacted);
+    }
+    if request.require_verified_source
+        && (memory.provenance.source_journal_seq.is_none()
+            || memory.provenance.source_record_hash.is_none())
+    {
+        reasons.insert(MemoryContextRejectReason::SourceRecordMissing);
+    }
+    if memory.record.confidence_basis_points < request.min_confidence_basis_points {
+        reasons.insert(MemoryContextRejectReason::ConfidenceTooLow);
+    }
+    if let Some(scope) = request.scope.as_deref()
+        && memory.record.scope.as_deref() != Some(scope)
+    {
+        reasons.insert(MemoryContextRejectReason::ScopeMismatch);
+    }
+    if !request.allowed_sensitivities.is_empty()
+        && !request
+            .allowed_sensitivities
+            .contains(&memory.record.sensitivity)
+    {
+        reasons.insert(MemoryContextRejectReason::SensitivityNotAllowed);
+    }
+    if memory
+        .record
+        .source_taint
+        .iter()
+        .any(|taint| request.denied_source_taint.contains(taint))
+    {
+        reasons.insert(MemoryContextRejectReason::SourceTaintDenied);
+    }
+    if memory
+        .record
+        .source_data_classes
+        .iter()
+        .any(|class| request.denied_source_data_classes.contains(class))
+    {
+        reasons.insert(MemoryContextRejectReason::SourceDataClassDenied);
+    }
+    if !request.allowed_kinds.is_empty() && !request.allowed_kinds.contains(&memory.record.kind) {
+        reasons.insert(MemoryContextRejectReason::KindNotAllowed);
+    }
+    if !request.allowed_access_policies.is_empty()
+        && !request
+            .allowed_access_policies
+            .contains(&memory.record.access_policy)
+    {
+        reasons.insert(MemoryContextRejectReason::AccessPolicyNotAllowed);
+    }
+    if !request.trusted_writers.is_empty()
+        && !request.trusted_writers.contains(&memory.provenance.writer)
+    {
+        reasons.insert(MemoryContextRejectReason::WriterNotTrusted);
+    }
+    reasons.into_iter().collect()
+}
+
+fn memory_context_warnings(
+    memory: &ProjectedMemory,
+    request: &MemoryContextRequest,
+) -> Vec<MemoryContextWarning> {
+    let mut warnings = BTreeSet::from([MemoryContextWarning::MemoryIsContextNotAuthority]);
+    if request.trusted_writers.is_empty() {
+        warnings.insert(MemoryContextWarning::WriterTrustNotConstrained);
+    }
+    if !request.include_content_refs && !memory.record.content_ref.is_empty() {
+        warnings.insert(MemoryContextWarning::ContentRefOmitted);
+    }
+    warnings.into_iter().collect()
 }
 
 /// Project the current memory state from a journal or snapshot at `now`.
@@ -310,6 +681,14 @@ pub fn project_with_redactions(
         .iter()
         .map(|directive| (directive.memory_id.as_str(), directive))
         .collect();
+    let source_records: BTreeMap<&str, (u64, &HashValue)> = source
+        .journal_records()
+        .iter()
+        .filter_map(|record| {
+            memory_source_event_id(&record.event)
+                .map(|event_id| (event_id, (record.seq, &record.hash)))
+        })
+        .collect();
 
     let mut memories: BTreeMap<String, ProjectedMemory> = BTreeMap::new();
 
@@ -325,6 +704,12 @@ pub fn project_with_redactions(
             writer: memory.writer.clone(),
             journal_seq: record.seq,
             journal_record_hash: record.hash.clone(),
+            source_journal_seq: source_records
+                .get(memory.source_event_id.as_str())
+                .map(|(seq, _hash)| *seq),
+            source_record_hash: source_records
+                .get(memory.source_event_id.as_str())
+                .map(|(_seq, hash)| (*hash).clone()),
             created_at: memory.created_at,
         };
 
@@ -367,5 +752,33 @@ pub fn project_with_redactions(
     MemoryProjection {
         projected_at: now,
         memories,
+    }
+}
+
+fn memory_source_event_id(event: &JournalEvent) -> Option<&str> {
+    match event {
+        JournalEvent::SessionCreated { session } => Some(session.session_id.as_str()),
+        JournalEvent::SessionStatusChanged { transition_id, .. } => Some(transition_id.as_str()),
+        JournalEvent::CapabilityGranted { grant } => Some(grant.grant_id.as_str()),
+        JournalEvent::CapabilityRevoked {
+            revocation_handle, ..
+        } => Some(revocation_handle.as_str()),
+        JournalEvent::PaymentMandateIssued { mandate } => Some(mandate.mandate_id.as_str()),
+        JournalEvent::ActionProposed { manifest } => Some(manifest.action_id.as_str()),
+        JournalEvent::PolicyDecided { decision } => Some(decision.decision_id.as_str()),
+        JournalEvent::ExecutionLeaseIssued { lease } => Some(lease.lease_id.as_str()),
+        JournalEvent::ExecutionLeaseHeartbeated { heartbeat } => {
+            Some(heartbeat.heartbeat_id.as_str())
+        }
+        JournalEvent::ExecutionLeaseReconciled { reconciliation } => {
+            Some(reconciliation.reconciliation_id.as_str())
+        }
+        JournalEvent::ApprovalRecorded { approval } => Some(approval.review_id.as_str()),
+        JournalEvent::SimulationRecorded { simulation } => Some(simulation.simulation_id.as_str()),
+        JournalEvent::ReceiptAppended { receipt } => Some(receipt.receipt_id.as_str()),
+        JournalEvent::ModelRouteDecided { decision } => Some(decision.decision_id.as_str()),
+        JournalEvent::MemoryWritten { .. } => None,
+        JournalEvent::ScenarioEvaluated { scenario, .. } => Some(scenario.scenario_id.as_str()),
+        JournalEvent::IncidentAnnotated { incident_id, .. } => Some(incident_id.as_str()),
     }
 }

@@ -28,8 +28,13 @@ use beater_os_core::{
     ActionKind, ActionManifest, AgentSession, BeaterOsError, Budget, CapabilityGrant,
     CapabilityReceipt, CapabilityReceiptInput, CapabilityScope, CapabilitySelector, DataClass,
     DecisionResult, DelegationMode, ExecutionLeaseReconciliation, ExecutionLeaseResolution,
-    GrantConstraints, HashValue, ModelPolicy, ResourceKind, RiskClass, SessionStatus,
-    SideEffectClass, TaintLabel, hash_json,
+    GrantConstraints, HashValue, ModelPolicy, ModelRouteDecisionRecord, ResourceKind, RiskClass,
+    SessionStatus, SideEffectClass, TaintLabel, hash_json,
+};
+use beater_os_memory::{MemoryContextRequest, MemoryContextSelection};
+use beater_os_model_router::{
+    ModelRoute, ModelRouteCatalog, ModelRouteDecision, ModelRouteDecisionResult, ModelRouteRequest,
+    ModelRouterError, choose_model_route_at,
 };
 use beater_os_sandbox::{SandboxLimits, safe_path_environment};
 use beater_os_tool_gateway::{
@@ -61,6 +66,8 @@ pub enum RuntimeError {
     Core(#[from] BeaterOsError),
     #[error(transparent)]
     Gateway(#[from] GatewayError),
+    #[error(transparent)]
+    ModelRouter(#[from] ModelRouterError),
     #[error("runtime refused request: {0}")]
     Refused(String),
     #[error("invalid ttl seconds: {0}")]
@@ -248,6 +255,130 @@ impl AgentRuntime {
             issued_grants,
             steps: step_reports,
             projection: RuntimeBundleProjectionSummary::from_projection(&projection),
+        })
+    }
+
+    /// Select a model route using trusted route metadata and the daemon-owned
+    /// session `ModelPolicy`.
+    ///
+    /// This is intentionally metadata-only: it performs no provider call and
+    /// sends no prompt data. It does journal compact route-decision evidence so
+    /// callers that later execute a model call can carry the returned
+    /// `decision_id` plus journal seq/hash as proof that the route was selected
+    /// against the current session policy.
+    pub fn choose_model_route(
+        &self,
+        request: RuntimeModelRouteRequest,
+    ) -> RuntimeResult<RuntimeModelRouteOutcome> {
+        let RuntimeModelRouteRequest {
+            session_id,
+            routes,
+            mut request,
+        } = request;
+        if request.session_id != session_id {
+            return Err(RuntimeError::Refused(format!(
+                "model route request session_id {} does not match runtime session_id {session_id}",
+                request.session_id
+            )));
+        }
+        let projection = self.store.project(&request.session_id)?;
+        if projection.session.status != SessionStatus::Running {
+            return Err(RuntimeError::Refused(format!(
+                "model route selection requires a running session, got {:?}",
+                projection.session.status
+            )));
+        }
+        if let Some(session_model_budget) = projection.session.budget.max_model_cents {
+            request.max_estimated_cents = Some(match request.max_estimated_cents {
+                Some(request_cap) => request_cap.min(session_model_budget),
+                None => session_model_budget,
+            });
+        }
+        let catalog = ModelRouteCatalog::new(routes)?;
+        let candidate_route_ids: BTreeSet<String> =
+            catalog.iter().map(|route| route.route_id.clone()).collect();
+        let decision = choose_model_route_at(
+            &catalog,
+            &projection.session.model_policy,
+            &request,
+            Utc::now(),
+        )?;
+        let recorded_at = Utc::now();
+        let selected_route_hash = decision
+            .selected
+            .as_ref()
+            .and_then(|selection| catalog.get(&selection.route_id))
+            .map(hash_json)
+            .transpose()?;
+        let decision_record = ModelRouteDecisionRecord {
+            decision_id: decision.decision_id.clone(),
+            session_id: decision.session_id.clone(),
+            result: model_route_decision_result_str(&decision.result).to_string(),
+            selected_route_id: decision
+                .selected
+                .as_ref()
+                .map(|selection| selection.route_id.clone()),
+            selected_route_hash,
+            candidate_route_ids,
+            rejected_route_ids: decision
+                .rejected_routes
+                .iter()
+                .map(|rejection| rejection.route_id.clone())
+                .collect(),
+            request_hash: hash_json(&request)?,
+            catalog_hash: hash_json(&catalog)?,
+            policy_hash: hash_json(&projection.session.model_policy)?,
+            decision_payload_hash: hash_json(&decision)?,
+            requested_at: decision.requested_at,
+            recorded_at,
+        };
+        let journal_record = self.store.record_model_route_decision(
+            &decision.session_id,
+            decision_record,
+            recorded_at,
+        )?;
+        let updated_projection = self.store.project(&decision.session_id)?;
+        Ok(RuntimeModelRouteOutcome {
+            decision,
+            journal_seq: journal_record.seq,
+            journal_record_hash: journal_record.hash,
+            projection: RuntimeBundleProjectionSummary::from_projection(&updated_projection),
+        })
+    }
+
+    /// Select policy-safe memory context from the daemon-owned journal.
+    ///
+    /// This is read-only. Memory remains non-authoritative context: the result
+    /// carries source-event anchoring, rejection reasons, and warnings, but it
+    /// never creates grants, approvals, receipts, model-route authority, or
+    /// trusted instructions.
+    pub fn select_memory_context(
+        &self,
+        request: RuntimeMemoryContextRequest,
+    ) -> RuntimeResult<RuntimeMemoryContextOutcome> {
+        if request.context.min_confidence_basis_points > 10_000 {
+            return Err(RuntimeError::Refused(format!(
+                "memory context min_confidence_basis_points {} exceeds 10000",
+                request.context.min_confidence_basis_points
+            )));
+        }
+        let selection =
+            self.store
+                .select_memory_context(&request.session_id, &request.context, Utc::now())?;
+        let projection_summary =
+            RuntimeBundleProjectionSummary::from_projection(&selection.projection);
+        Ok(RuntimeMemoryContextOutcome {
+            session_id: request.session_id,
+            projected_memories: selection.projected_memories,
+            active_memories: selection.active_memories,
+            selected_memories: selection.context.selected.len(),
+            rejected_memories: selection.context.rejected.len(),
+            truncated_memories: selection.context.truncated,
+            truncated_rejections: selection.context.truncated_rejections,
+            journal_records: selection.journal_records,
+            journal_root_hash: selection.journal_root_hash,
+            context: selection.context,
+            projection: projection_summary,
         })
     }
 
@@ -1313,6 +1444,13 @@ pub struct RuntimeBundle {
     pub steps: Vec<RuntimeStep>,
 }
 
+fn model_route_decision_result_str(result: &ModelRouteDecisionResult) -> &'static str {
+    match result {
+        ModelRouteDecisionResult::Allowed => "allowed",
+        ModelRouteDecisionResult::Denied => "denied",
+    }
+}
+
 /// Serializable result of running a hosted-runtime work bundle.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RuntimeBundleOutcome {
@@ -1320,6 +1458,62 @@ pub struct RuntimeBundleOutcome {
     pub created_session: bool,
     pub issued_grants: Vec<String>,
     pub steps: Vec<RuntimeBundleStepReport>,
+    pub projection: RuntimeBundleProjectionSummary,
+}
+
+/// Metadata-only route selection request for one future model call.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeModelRouteRequest {
+    /// Existing daemon session whose `ModelPolicy` and model budget are
+    /// authoritative for this metadata-only decision.
+    pub session_id: String,
+    /// Trusted route metadata supplied by local configuration or generated
+    /// client code. Model-authored text must not mint or modify these fields.
+    pub routes: Vec<ModelRoute>,
+    /// Proposed model call shape. `session_id` selects the daemon session whose
+    /// `ModelPolicy` is authoritative for the decision.
+    pub request: ModelRouteRequest,
+}
+
+/// Runtime-facing model-route decision evidence.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RuntimeModelRouteOutcome {
+    pub decision: ModelRouteDecision,
+    pub journal_seq: u64,
+    pub journal_record_hash: HashValue,
+    pub projection: RuntimeBundleProjectionSummary,
+}
+
+/// Read-only request for bounded, policy-safe memory context.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeMemoryContextRequest {
+    /// Existing daemon session whose status and optional `memory_scope` bound
+    /// the memory projection.
+    pub session_id: String,
+    /// Selector policy. Omitted policy uses the safe default from
+    /// `beater-os-memory`: bounded public/internal context, no content refs,
+    /// redactions excluded, and source-record anchoring required.
+    #[serde(default = "MemoryContextRequest::default")]
+    pub context: MemoryContextRequest,
+}
+
+/// Runtime-facing memory-context result. The context payload is evidence, not
+/// authority.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RuntimeMemoryContextOutcome {
+    pub session_id: String,
+    pub projected_memories: usize,
+    pub active_memories: usize,
+    pub selected_memories: usize,
+    pub rejected_memories: usize,
+    pub truncated_memories: usize,
+    #[serde(default)]
+    pub truncated_rejections: usize,
+    pub journal_records: usize,
+    pub journal_root_hash: HashValue,
+    pub context: MemoryContextSelection,
     pub projection: RuntimeBundleProjectionSummary,
 }
 
@@ -1354,6 +1548,8 @@ pub struct RuntimeBundleProjectionSummary {
     pub active_grants: usize,
     pub actions: usize,
     pub decisions: usize,
+    #[serde(default)]
+    pub model_route_decisions: usize,
     #[serde(default)]
     pub pending_allowed_actions: usize,
     #[serde(default)]
@@ -1397,6 +1593,7 @@ impl RuntimeBundleProjectionSummary {
             active_grants: projection.active_grants(Utc::now()).len(),
             actions: projection.manifests.len(),
             decisions: projection.decisions.len(),
+            model_route_decisions: projection.model_route_decisions.len(),
             pending_allowed_actions: scheduler.pending_allowed_action_ids.len(),
             pending_allowed_action_ids: scheduler.pending_allowed_action_ids,
             runnable_pending_actions: scheduler.runnable_pending_action_ids.len(),

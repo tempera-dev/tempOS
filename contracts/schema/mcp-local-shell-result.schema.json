@@ -1,0 +1,202 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mcp-local-shell-result.schema.json",
+  "title": "McpLocalShellResult",
+  "description": "StructuredContent payload returned by the tempOS MCP stdio `tempos.local_shell` tool. This is model-facing evidence, not a raw stdout/stderr transcript.",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "decision",
+        "session_id",
+        "action_id",
+        "lease_id",
+        "tool_ref",
+        "manifest_hash",
+        "decision_id",
+        "proposal_seq",
+        "proposal_hash",
+        "decision_seq",
+        "decision_hash",
+        "admission_journal_root_hash",
+        "lease_seq",
+        "lease_hash",
+        "tool_id",
+        "exit_code",
+        "stdout_digest",
+        "stdout_truncated",
+        "stderr_truncated",
+        "created",
+        "created_count",
+        "created_truncated",
+        "modified",
+        "modified_count",
+        "modified_truncated",
+        "deleted",
+        "deleted_count",
+        "deleted_truncated",
+        "receipt_id",
+        "receipt_hash",
+        "receipt_journal_seq",
+        "receipt_journal_hash",
+        "receipt_seq",
+        "receipt_root_hash",
+        "final_journal_root_hash",
+        "receipts",
+        "runnable_pending_actions",
+        "open_execution_leases"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["ok", "failed", "timeout", "signaled"]
+        },
+        "decision": { "const": "allowed" },
+        "session_id": { "type": "string", "minLength": 1 },
+        "action_id": { "type": "string", "minLength": 1 },
+        "lease_id": { "type": "string", "minLength": 1 },
+        "tool_ref": { "type": "string", "minLength": 1 },
+        "manifest_hash": { "$ref": "common.schema.json#/$defs/hash_value" },
+        "decision_id": { "type": "string", "minLength": 1 },
+        "proposal_seq": { "$ref": "common.schema.json#/$defs/uint" },
+        "proposal_hash": { "$ref": "common.schema.json#/$defs/hash_value" },
+        "decision_seq": { "$ref": "common.schema.json#/$defs/uint" },
+        "decision_hash": { "$ref": "common.schema.json#/$defs/hash_value" },
+        "admission_journal_root_hash": { "$ref": "common.schema.json#/$defs/hash_value" },
+        "lease_seq": { "$ref": "common.schema.json#/$defs/uint" },
+        "lease_hash": { "$ref": "common.schema.json#/$defs/hash_value" },
+        "tool_id": { "type": "string", "minLength": 1 },
+        "exit_code": {
+          "oneOf": [
+            { "type": "integer" },
+            { "type": "null" }
+          ]
+        },
+        "stdout_digest": { "$ref": "common.schema.json#/$defs/hash_value" },
+        "stdout_truncated": { "type": "boolean" },
+        "stderr_truncated": { "type": "boolean" },
+        "created": { "type": "array", "items": { "type": "string" } },
+        "created_count": { "$ref": "common.schema.json#/$defs/uint" },
+        "created_truncated": { "type": "boolean" },
+        "modified": { "type": "array", "items": { "type": "string" } },
+        "modified_count": { "$ref": "common.schema.json#/$defs/uint" },
+        "modified_truncated": { "type": "boolean" },
+        "deleted": { "type": "array", "items": { "type": "string" } },
+        "deleted_count": { "$ref": "common.schema.json#/$defs/uint" },
+        "deleted_truncated": { "type": "boolean" },
+        "receipt_id": { "type": "string", "minLength": 1 },
+        "receipt_hash": { "$ref": "common.schema.json#/$defs/hash_value" },
+        "receipt_journal_seq": { "$ref": "common.schema.json#/$defs/uint" },
+        "receipt_journal_hash": { "$ref": "common.schema.json#/$defs/hash_value" },
+        "receipt_seq": { "$ref": "common.schema.json#/$defs/uint" },
+        "receipt_root_hash": { "$ref": "common.schema.json#/$defs/hash_value" },
+        "final_journal_root_hash": { "$ref": "common.schema.json#/$defs/hash_value" },
+        "receipts": { "$ref": "common.schema.json#/$defs/uint" },
+        "runnable_pending_actions": { "$ref": "common.schema.json#/$defs/uint" },
+        "open_execution_leases": { "$ref": "common.schema.json#/$defs/uint" }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "decision",
+        "matched_rules",
+        "explanation",
+        "session_id",
+        "action_id",
+        "manifest_hash",
+        "decision_id",
+        "final_journal_root_hash"
+      ],
+      "properties": {
+        "status": { "const": "admission_refused" },
+        "decision": {
+          "type": "string",
+          "enum": ["denied", "needs_approval", "needs_simulation", "needs_narrowed_grant"]
+        },
+        "matched_rules": { "type": "array", "items": { "type": "string" } },
+        "explanation": { "type": "string" },
+        "session_id": { "type": "string", "minLength": 1 },
+        "action_id": { "type": "string", "minLength": 1 },
+        "manifest_hash": { "$ref": "common.schema.json#/$defs/hash_value" },
+        "decision_id": { "type": "string", "minLength": 1 },
+        "final_journal_root_hash": { "$ref": "common.schema.json#/$defs/hash_value" }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "decision",
+        "session_id",
+        "action_id",
+        "error",
+        "final_journal_root_hash",
+        "open_execution_leases",
+        "open_execution_lease_statuses",
+        "open_execution_lease_ids",
+        "live_open_execution_leases",
+        "live_open_execution_lease_ids",
+        "expired_recoverable_execution_leases",
+        "expired_recoverable_execution_lease_ids",
+        "recovery_blocked",
+        "admission_blocked",
+        "admission_blockers"
+      ],
+      "properties": {
+        "status": { "const": "execution_incomplete" },
+        "decision": { "const": "allowed" },
+        "session_id": { "type": "string", "minLength": 1 },
+        "action_id": { "type": "string", "minLength": 1 },
+        "error": { "type": "string", "minLength": 1 },
+        "final_journal_root_hash": { "$ref": "common.schema.json#/$defs/hash_value" },
+        "open_execution_leases": { "$ref": "common.schema.json#/$defs/uint" },
+        "open_execution_lease_statuses": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/open_execution_lease_status" }
+        },
+        "open_execution_lease_ids": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "live_open_execution_leases": { "$ref": "common.schema.json#/$defs/uint" },
+        "live_open_execution_lease_ids": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "expired_recoverable_execution_leases": { "$ref": "common.schema.json#/$defs/uint" },
+        "expired_recoverable_execution_lease_ids": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "recovery_blocked": { "type": "boolean" },
+        "admission_blocked": { "type": "boolean" },
+        "admission_blockers": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "open_execution_lease_status": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action_id", "lease_id", "expires_at", "status"],
+      "properties": {
+        "action_id": { "type": "string", "minLength": 1 },
+        "lease_id": { "type": "string", "minLength": 1 },
+        "expires_at": { "$ref": "common.schema.json#/$defs/timestamp" },
+        "status": {
+          "type": "string",
+          "enum": ["live_open", "expired_recoverable"]
+        }
+      }
+    }
+  }
+}

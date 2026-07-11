@@ -19,6 +19,7 @@ pub(crate) fn event_kind(event: &JournalEvent) -> &'static str {
         JournalEvent::ApprovalRecorded { .. } => "approval_recorded",
         JournalEvent::SimulationRecorded { .. } => "simulation_recorded",
         JournalEvent::ReceiptAppended { .. } => "receipt_appended",
+        JournalEvent::ModelRouteDecided { .. } => "model_route_decided",
         JournalEvent::MemoryWritten { .. } => "memory_written",
         JournalEvent::ScenarioEvaluated { .. } => "scenario_evaluated",
         JournalEvent::IncidentAnnotated { .. } => "incident_annotated",

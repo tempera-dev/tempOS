@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "runtime-memory-record-response.schema.json",
+  "title": "RuntimeMemoryRecordResponse",
+  "description": "HTTP/runtime response after recording one MemoryWritten journal event through the daemon boundary.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "session_id",
+    "memory_id",
+    "memory_seq",
+    "memory_journal_hash",
+    "final_journal_root_hash"
+  ],
+  "properties": {
+    "session_id": { "type": "string", "minLength": 1 },
+    "memory_id": { "type": "string", "minLength": 1 },
+    "memory_seq": { "type": "integer", "minimum": 0 },
+    "memory_journal_hash": { "$ref": "common.schema.json#/$defs/hash_value" },
+    "final_journal_root_hash": { "$ref": "common.schema.json#/$defs/hash_value" }
+  }
+}

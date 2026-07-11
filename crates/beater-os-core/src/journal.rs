@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 use crate::contracts::{
     ActionKind, ActionManifest, AgentSession, ApprovalEvidence, CapabilityGrant, DecisionResult,
     ExecutionLease, ExecutionLeaseHeartbeat, ExecutionLeaseReconciliation, MemoryRecord,
-    PaymentIntent, PaymentMandate, PolicyDecision, ScenarioManifest, SessionStatus,
-    SideEffectClass, SimulationEvidence,
+    ModelRouteDecisionRecord, PaymentIntent, PaymentMandate, PolicyDecision, ScenarioManifest,
+    SessionStatus, SideEffectClass, SimulationEvidence,
 };
 use crate::error::{BeaterOsError, BeaterOsResult};
 use crate::hash::{GENESIS_HASH, HashValue, hash_json};
@@ -64,6 +64,9 @@ pub enum JournalEvent {
     },
     ReceiptAppended {
         receipt: CapabilityReceipt,
+    },
+    ModelRouteDecided {
+        decision: ModelRouteDecisionRecord,
     },
     MemoryWritten {
         memory: MemoryRecord,
@@ -742,6 +745,9 @@ fn verify_event_causality(
             state.receipt_chain.push(receipt.clone());
             ReceiptLedger::from_receipts(state.receipt_chain.clone()).verify_chain()?;
         }
+        JournalEvent::ModelRouteDecided { decision } => {
+            validate_model_route_decision_record(record, decision, state)?;
+        }
         JournalEvent::PaymentMandateIssued { mandate } => {
             if state.issued_mandates.contains_key(&mandate.mandate_id) {
                 return causality_error(
@@ -1088,6 +1094,169 @@ fn validate_execution_lease_reconciliation(
                 reconciliation.reconciliation_id, lease.lease_id
             ),
         );
+    }
+    Ok(())
+}
+
+fn validate_model_route_decision_record(
+    record: &JournalRecord,
+    decision: &ModelRouteDecisionRecord,
+    state: &CausalityState,
+) -> BeaterOsResult<()> {
+    for (field, value) in [
+        ("decision_id", decision.decision_id.as_str()),
+        ("session_id", decision.session_id.as_str()),
+        ("result", decision.result.as_str()),
+        ("request_hash", decision.request_hash.as_str()),
+        ("catalog_hash", decision.catalog_hash.as_str()),
+        ("policy_hash", decision.policy_hash.as_str()),
+        (
+            "decision_payload_hash",
+            decision.decision_payload_hash.as_str(),
+        ),
+    ] {
+        if value.trim().is_empty() {
+            return causality_error(
+                record.seq,
+                format!("model route decision {field} field is empty"),
+            );
+        }
+    }
+    match state.session_statuses.get(&decision.session_id) {
+        Some(SessionStatus::Running) => {}
+        Some(status) => {
+            return causality_error(
+                record.seq,
+                format!(
+                    "model route decision {} was recorded while session {} was {status:?}",
+                    decision.decision_id, decision.session_id
+                ),
+            );
+        }
+        None => {
+            return causality_error(
+                record.seq,
+                format!(
+                    "model route decision {} references unknown session {}",
+                    decision.decision_id, decision.session_id
+                ),
+            );
+        }
+    }
+    if decision.requested_at > record.created_at {
+        return causality_error(
+            record.seq,
+            format!(
+                "model route decision {} request time is after journal record time",
+                decision.decision_id
+            ),
+        );
+    }
+    if decision.recorded_at != record.created_at {
+        return causality_error(
+            record.seq,
+            format!(
+                "model route decision {} recorded_at does not match journal record time",
+                decision.decision_id
+            ),
+        );
+    }
+    match decision.result.as_str() {
+        "allowed" => {
+            if decision.selected_route_id.is_none() {
+                return causality_error(
+                    record.seq,
+                    format!(
+                        "model route decision {} is allowed without a selected route",
+                        decision.decision_id
+                    ),
+                );
+            }
+            if decision.selected_route_hash.is_none() {
+                return causality_error(
+                    record.seq,
+                    format!(
+                        "model route decision {} is allowed without selected route metadata hash",
+                        decision.decision_id
+                    ),
+                );
+            }
+        }
+        "denied" => {
+            if decision.selected_route_id.is_some() {
+                return causality_error(
+                    record.seq,
+                    format!(
+                        "model route decision {} is denied with a selected route",
+                        decision.decision_id
+                    ),
+                );
+            }
+            if decision.selected_route_hash.is_some() {
+                return causality_error(
+                    record.seq,
+                    format!(
+                        "model route decision {} is denied with selected route metadata hash",
+                        decision.decision_id
+                    ),
+                );
+            }
+        }
+        result => {
+            return causality_error(
+                record.seq,
+                format!(
+                    "model route decision {} has unsupported result {result}",
+                    decision.decision_id
+                ),
+            );
+        }
+    }
+    if let Some(selected) = &decision.selected_route_id {
+        if selected.trim().is_empty() {
+            return causality_error(
+                record.seq,
+                format!(
+                    "model route decision {} selected route id is empty",
+                    decision.decision_id
+                ),
+            );
+        }
+        if !decision.candidate_route_ids.contains(selected) {
+            return causality_error(
+                record.seq,
+                format!(
+                    "model route decision {} selected route {} was not in candidate routes",
+                    decision.decision_id, selected
+                ),
+            );
+        }
+    }
+    if let Some(selected_route_hash) = &decision.selected_route_hash
+        && selected_route_hash.trim().is_empty()
+    {
+        return causality_error(
+            record.seq,
+            format!(
+                "model route decision {} selected route metadata hash is empty",
+                decision.decision_id
+            ),
+        );
+    }
+    for route_id in decision
+        .candidate_route_ids
+        .iter()
+        .chain(decision.rejected_route_ids.iter())
+    {
+        if route_id.trim().is_empty() {
+            return causality_error(
+                record.seq,
+                format!(
+                    "model route decision {} contains an empty route id",
+                    decision.decision_id
+                ),
+            );
+        }
     }
     Ok(())
 }
@@ -1590,6 +1759,7 @@ fn primary_event_id(record: &JournalRecord) -> Option<&str> {
         JournalEvent::ApprovalRecorded { approval } => Some(approval.review_id.as_str()),
         JournalEvent::SimulationRecorded { simulation } => Some(simulation.simulation_id.as_str()),
         JournalEvent::ReceiptAppended { receipt } => Some(receipt.receipt_id.as_str()),
+        JournalEvent::ModelRouteDecided { decision } => Some(decision.decision_id.as_str()),
         // Memory ids are mutable projection keys: `beater-os-memory` explicitly
         // supports last-writer-wins rewrites for the same memory_id. They are
         // therefore not unambiguous journal event ids for provenance.
@@ -1618,6 +1788,15 @@ fn validate_memory_source<'a>(
         return causality_error(
             seq,
             format!("memory {} has an empty source_event_id", memory.memory_id),
+        );
+    }
+    if memory.confidence_basis_points > 10_000 {
+        return causality_error(
+            seq,
+            format!(
+                "memory {} confidence_basis_points exceeds 10000",
+                memory.memory_id
+            ),
         );
     }
     if !known_event_ids

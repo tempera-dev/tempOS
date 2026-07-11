@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mcp-local-shell-call.schema.json",
+  "title": "McpLocalShellCall",
+  "description": "Arguments object for the tempOS MCP stdio `tempos.local_shell` tool. The caller supplies proposed command metadata only; daemon admission, lease, sandbox, and receipt evidence remain authoritative.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["session_id", "command", "cwd", "grants"],
+  "properties": {
+    "session_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "action_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "command": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[^/]+$",
+      "description": "PATH-resolved command name. Slash-containing paths are refused so the gateway resolves executable identity from the sandbox-safe PATH."
+    },
+    "args": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "string",
+        "maxLength": 4096
+      }
+    },
+    "cwd": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096,
+      "description": "Workspace directory to canonicalize before admission and sandbox execution."
+    },
+    "env": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^BEATER_[A-Za-z0-9_]*$"
+      },
+      "additionalProperties": {
+        "type": "string",
+        "maxLength": 8192
+      },
+      "maxProperties": 15,
+      "description": "Optional non-secret BEATER_* variables layered over the gateway's safe sandbox PATH. PATH, inherited process environment, and BEATER_* names that look like tokens, secrets, keys, passwords, auth, bearer, or credentials are never accepted."
+    },
+    "grants": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 256
+      }
+    },
+    "risk": {
+      "$ref": "common.schema.json#/$defs/risk_class"
+    },
+    "side_effects": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "const": "local_write"
+      }
+    },
+    "data_classes": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "common.schema.json#/$defs/data_class"
+      }
+    },
+    "taint": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "common.schema.json#/$defs/taint_label"
+      }
+    },
+    "timeout_secs": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 30
+    },
+    "max_output_bytes": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65536,
+      "description": "Per-call sandbox stdout/stderr collection cap. The runtime additionally refuses values above SandboxLimits::default().max_output_bytes."
+    },
+    "max_model_output_bytes": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65536,
+      "description": "Per-call cap for the model-visible text fallback. The runtime additionally refuses values above the server-configured maximum, which defaults lower than this schema-wide ceiling."
+    },
+    "explanation": {
+      "type": "string",
+      "maxLength": 2048
+    },
+    "idempotency_key": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "receipt_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    }
+  }
+}

@@ -25,9 +25,13 @@ use beater_os_core::{
     ActionKind, ActionManifest, AdmissionContext, AgentSession, ApprovalEvidence, Budget,
     CapabilityGrant, CapabilityReceipt, CapabilityReceiptInput, CapabilityScope, DecisionResult,
     DelegationMode, ExecutionLease, ExecutionLeaseHeartbeat, ExecutionLeaseReconciliation,
-    HashValue, InMemoryJournal, JournalEvent, JournalRecord, JournalSnapshot, PaymentMandate,
-    PolicyDecision, PolicyEngine, ReceiptLedger, ResourceKind, RiskClass, SessionStatus,
-    SideEffectClass, SimulationEvidence, ToolManifest,
+    HashValue, InMemoryJournal, JournalEvent, JournalRecord, JournalSnapshot, MemoryRecord,
+    ModelRouteDecisionRecord, PaymentMandate, PolicyDecision, PolicyEngine, ReceiptLedger,
+    ResourceKind, RiskClass, SessionStatus, SideEffectClass, SimulationEvidence, ToolManifest,
+    hash_json,
+};
+use beater_os_memory::{
+    MemoryContextRequest, MemoryContextSelection, project as project_memory_journal,
 };
 use beater_os_tool_registry::{
     RegisteredTool, RegistryPolicy, ResolveRequest, TestStatus, ToolRegistry, ToolTrust,
@@ -161,6 +165,7 @@ pub struct SessionProjection {
     pub execution_leases: Vec<ExecutionLease>,
     pub execution_lease_heartbeats: Vec<ExecutionLeaseHeartbeat>,
     pub execution_reconciliations: Vec<ExecutionLeaseReconciliation>,
+    pub model_route_decisions: Vec<ModelRouteDecisionRecord>,
     pub approvals: Vec<ApprovalEvidence>,
     pub simulations: Vec<SimulationEvidence>,
     pub receipts: Vec<CapabilityReceipt>,
@@ -205,6 +210,18 @@ pub struct SchedulerProjection {
 pub struct SessionTraceExport {
     pub projection: SessionProjection,
     pub journal: JournalSnapshot,
+}
+
+/// Store-owned memory context projection tied to one verified journal snapshot.
+#[derive(Debug, Clone)]
+pub struct StoreMemoryContextSelection {
+    pub session_id: String,
+    pub projection: SessionProjection,
+    pub projected_memories: usize,
+    pub active_memories: usize,
+    pub journal_records: usize,
+    pub journal_root_hash: HashValue,
+    pub context: MemoryContextSelection,
 }
 
 /// Exact local-shell tool version to persist in the daemon-owned tool registry.
@@ -693,6 +710,12 @@ impl Store {
                     "PolicyDecided must be written through admit_action".to_string(),
                 ));
             }
+            JournalEvent::ModelRouteDecided { .. } => {
+                return Err(DaemonError::Refused(
+                    "ModelRouteDecided must be written through record_model_route_decision"
+                        .to_string(),
+                ));
+            }
             JournalEvent::ApprovalRecorded { .. } => {
                 return Err(DaemonError::Refused(
                     "ApprovalRecorded must be written through record_approval".to_string(),
@@ -707,6 +730,70 @@ impl Store {
         }
         self.with_session_lock(session_id, || {
             self.append_event_unlocked(session_id, event, created_at)
+        })
+    }
+
+    /// Record metadata-only model route selection evidence through the daemon
+    /// boundary. This journals the route decision without issuing authority to
+    /// call a provider and without storing prompt data.
+    pub fn record_model_route_decision(
+        &self,
+        session_id: &str,
+        decision: ModelRouteDecisionRecord,
+        created_at: DateTime<Utc>,
+    ) -> DaemonResult<JournalRecord> {
+        if decision.session_id != session_id {
+            return Err(DaemonError::Refused(format!(
+                "model route decision session_id {} does not match route session {}",
+                decision.session_id, session_id
+            )));
+        }
+        self.with_session_lock(session_id, || {
+            let mut journal = self.load_journal_unlocked(session_id)?;
+            let projection = project_journal(session_id, &journal)?;
+            ensure_session_running(&projection.session)?;
+            let expected_policy_hash = hash_json(&projection.session.model_policy)?;
+            if decision.policy_hash != expected_policy_hash {
+                return Err(DaemonError::Refused(format!(
+                    "model route decision {} policy_hash {} does not match current session policy {}",
+                    decision.decision_id, decision.policy_hash, expected_policy_hash
+                )));
+            }
+            let admission_state = admission_state_from_journal(session_id, &journal)?;
+            if !admission_state.open_execution_leases.is_empty() {
+                return Err(open_execution_lease_refusal(
+                    session_id,
+                    &admission_state.open_execution_leases,
+                    "record model route decision",
+                ));
+            }
+            let record =
+                journal.append(JournalEvent::ModelRouteDecided { decision }, created_at)?;
+            journal.verify_chain()?;
+            self.write_journal_record_unlocked(session_id, &record)?;
+            Ok(record)
+        })
+    }
+
+    /// Record one non-authoritative memory fact through the daemon boundary.
+    ///
+    /// The memory is bound to this session by the journal it is appended to.
+    /// `InMemoryJournal::append` verifies that `source_event_id` names a prior
+    /// event in the same journal before the record is made durable.
+    pub fn record_memory(
+        &self,
+        session_id: &str,
+        memory: MemoryRecord,
+        created_at: DateTime<Utc>,
+    ) -> DaemonResult<JournalRecord> {
+        self.with_session_lock(session_id, || {
+            let mut journal = self.load_journal_unlocked(session_id)?;
+            let projection = project_journal(session_id, &journal)?;
+            ensure_session_running(&projection.session)?;
+            let record = journal.append(JournalEvent::MemoryWritten { memory }, created_at)?;
+            journal.verify_chain()?;
+            self.write_journal_record_unlocked(session_id, &record)?;
+            Ok(record)
         })
     }
 
@@ -1975,6 +2062,60 @@ impl Store {
         self.with_session_lock(session_id, || self.project_unlocked(session_id))
     }
 
+    /// Select bounded memory context from a verified journal snapshot under the
+    /// session lock.
+    ///
+    /// The generic session projection intentionally does not expose memory as
+    /// authority. This method keeps the memory service as a read-only,
+    /// provenance-carrying context projection over the exact journal root
+    /// reported in the result.
+    pub fn select_memory_context(
+        &self,
+        session_id: &str,
+        request: &MemoryContextRequest,
+        now: DateTime<Utc>,
+    ) -> DaemonResult<StoreMemoryContextSelection> {
+        self.with_session_lock(session_id, || {
+            let journal = self.load_journal_unlocked(session_id)?;
+            let session_projection = project_journal(session_id, &journal)?;
+            ensure_session_running(&session_projection.session)?;
+            if request.min_confidence_basis_points > 10_000 {
+                return Err(DaemonError::Refused(format!(
+                    "memory context min_confidence_basis_points {} exceeds 10000",
+                    request.min_confidence_basis_points
+                )));
+            }
+            let mut effective_request = request.clone();
+            match (
+                session_projection.session.memory_scope.as_deref(),
+                effective_request.scope.as_deref(),
+            ) {
+                (Some(session_scope), Some(request_scope)) if session_scope != request_scope => {
+                    return Err(DaemonError::Refused(format!(
+                        "memory context scope {request_scope} does not match session memory_scope {session_scope}"
+                    )));
+                }
+                (Some(session_scope), None) => {
+                    effective_request.scope = Some(session_scope.to_string());
+                }
+                _ => {}
+            }
+            let journal_records = journal.records().len();
+            let journal_root_hash = journal.root_hash();
+            let memory_projection = project_memory_journal(&journal, now);
+            let context = memory_projection.select_context(&effective_request);
+            Ok(StoreMemoryContextSelection {
+                session_id: session_id.to_string(),
+                projection: session_projection,
+                projected_memories: memory_projection.len(),
+                active_memories: memory_projection.active_count(),
+                journal_records,
+                journal_root_hash,
+                context,
+            })
+        })
+    }
+
     /// Return unresolved execution leases from the journal-derived runtime
     /// state under the session lock.
     ///
@@ -2207,6 +2348,7 @@ fn project_journal(session_id: &str, journal: &InMemoryJournal) -> DaemonResult<
     let mut execution_leases = Vec::new();
     let mut execution_lease_heartbeats = Vec::new();
     let mut execution_reconciliations = Vec::new();
+    let mut model_route_decisions = Vec::new();
     let mut approvals = Vec::new();
     let mut simulations = Vec::new();
     let mut receipts = Vec::new();
@@ -2268,6 +2410,9 @@ fn project_journal(session_id: &str, journal: &InMemoryJournal) -> DaemonResult<
             JournalEvent::ExecutionLeaseReconciled { reconciliation } => {
                 execution_reconciliations.push(reconciliation.clone());
             }
+            JournalEvent::ModelRouteDecided { decision } => {
+                model_route_decisions.push(decision.clone());
+            }
             JournalEvent::ApprovalRecorded { approval } => approvals.push(approval.clone()),
             JournalEvent::SimulationRecorded { simulation } => simulations.push(simulation.clone()),
             JournalEvent::ReceiptAppended { receipt } => receipts.push(receipt.clone()),
@@ -2291,6 +2436,7 @@ fn project_journal(session_id: &str, journal: &InMemoryJournal) -> DaemonResult<
         execution_leases,
         execution_lease_heartbeats,
         execution_reconciliations,
+        model_route_decisions,
         approvals,
         simulations,
         receipts,
@@ -2559,7 +2705,8 @@ fn admission_state_from_journal(
                 open_execution_leases.remove(&receipt.action_id);
                 debit_receipt_budget(&mut session_budget_used, receipt)?;
             }
-            JournalEvent::MemoryWritten { .. }
+            JournalEvent::ModelRouteDecided { .. }
+            | JournalEvent::MemoryWritten { .. }
             | JournalEvent::ScenarioEvaluated { .. }
             | JournalEvent::IncidentAnnotated { .. } => {}
         }
@@ -2816,6 +2963,7 @@ fn journal_event_id(event: &JournalEvent) -> Option<&str> {
         JournalEvent::ApprovalRecorded { approval } => Some(approval.review_id.as_str()),
         JournalEvent::SimulationRecorded { simulation } => Some(simulation.simulation_id.as_str()),
         JournalEvent::ReceiptAppended { receipt } => Some(receipt.receipt_id.as_str()),
+        JournalEvent::ModelRouteDecided { decision } => Some(decision.decision_id.as_str()),
         JournalEvent::MemoryWritten { .. } => None,
         JournalEvent::ScenarioEvaluated { scenario, .. } => Some(scenario.scenario_id.as_str()),
         JournalEvent::IncidentAnnotated { incident_id, .. } => Some(incident_id.as_str()),

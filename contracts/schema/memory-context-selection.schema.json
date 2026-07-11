@@ -1,0 +1,214 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "memory-context-selection.schema.json",
+  "title": "MemoryContextSelection",
+  "description": "Structured result of policy-safe memory context selection. Selected items are model/tool context evidence only; rejected records remain audit-visible with reasons, subject to the rejection cap.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["projected_at", "selected", "rejected", "truncated", "truncated_rejections", "selection_policy"],
+  "properties": {
+    "projected_at": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "selected": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/memory_context_item" }
+    },
+    "rejected": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/memory_context_rejection" }
+    },
+    "truncated": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Accepted records omitted by max_items."
+    },
+    "truncated_rejections": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Rejected records omitted by max_rejections."
+    },
+    "selection_policy": { "$ref": "#/$defs/memory_context_policy_summary" }
+  },
+  "$defs": {
+    "memory_provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "memory_id",
+        "source_event_id",
+        "source_digest",
+        "writer",
+        "journal_seq",
+        "journal_record_hash",
+        "created_at"
+      ],
+      "properties": {
+        "memory_id": { "type": "string", "minLength": 1 },
+        "source_event_id": { "type": "string", "minLength": 1 },
+        "source_digest": { "type": "string" },
+        "writer": { "type": "string" },
+        "journal_seq": { "type": "integer", "minimum": 0 },
+        "journal_record_hash": { "$ref": "common.schema.json#/$defs/hash_value" },
+        "source_journal_seq": {
+          "oneOf": [
+            { "type": "integer", "minimum": 0 },
+            { "type": "null" }
+          ]
+        },
+        "source_record_hash": {
+          "oneOf": [
+            { "$ref": "common.schema.json#/$defs/hash_value" },
+            { "type": "null" }
+          ]
+        },
+        "created_at": { "$ref": "common.schema.json#/$defs/timestamp" }
+      }
+    },
+    "memory_context_item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "memory_id",
+        "kind",
+        "summary",
+        "confidence_basis_points",
+        "sensitivity",
+        "source_taint",
+        "source_data_classes",
+        "access_policy",
+        "provenance",
+        "warnings"
+      ],
+      "properties": {
+        "memory_id": { "type": "string", "minLength": 1 },
+        "scope": {
+          "oneOf": [
+            { "type": "string" },
+            { "type": "null" }
+          ]
+        },
+        "kind": { "type": "string" },
+        "content_ref": { "type": "string" },
+        "summary": { "type": "string" },
+        "confidence_basis_points": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "sensitivity": { "$ref": "common.schema.json#/$defs/data_class" },
+        "source_taint": {
+          "type": "array",
+          "items": { "$ref": "common.schema.json#/$defs/taint_label" },
+          "uniqueItems": true
+        },
+        "source_data_classes": {
+          "type": "array",
+          "items": { "$ref": "common.schema.json#/$defs/data_class" },
+          "uniqueItems": true
+        },
+        "access_policy": { "type": "string" },
+        "provenance": { "$ref": "#/$defs/memory_provenance" },
+        "warnings": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/memory_context_warning" },
+          "uniqueItems": true
+        }
+      }
+    },
+    "memory_context_rejection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["memory_id", "reasons", "provenance"],
+      "properties": {
+        "memory_id": { "type": "string", "minLength": 1 },
+        "reasons": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/memory_context_reject_reason" },
+          "uniqueItems": true
+        },
+        "provenance": { "$ref": "#/$defs/memory_provenance" }
+      }
+    },
+    "memory_context_policy_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max_items",
+        "max_rejections",
+        "min_confidence_basis_points",
+        "allowed_sensitivities",
+        "denied_source_taint",
+        "denied_source_data_classes",
+        "allowed_kinds",
+        "allowed_access_policies",
+        "trusted_writers",
+        "include_redacted",
+        "include_content_refs",
+        "require_verified_source"
+      ],
+      "properties": {
+        "max_items": { "type": "integer", "minimum": 0 },
+        "max_rejections": { "type": "integer", "minimum": 0 },
+        "min_confidence_basis_points": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "scope": {
+          "oneOf": [
+            { "type": "string" },
+            { "type": "null" }
+          ]
+        },
+        "allowed_sensitivities": {
+          "type": "array",
+          "items": { "$ref": "common.schema.json#/$defs/data_class" },
+          "uniqueItems": true
+        },
+        "denied_source_taint": {
+          "type": "array",
+          "items": { "$ref": "common.schema.json#/$defs/taint_label" },
+          "uniqueItems": true
+        },
+        "denied_source_data_classes": {
+          "type": "array",
+          "items": { "$ref": "common.schema.json#/$defs/data_class" },
+          "uniqueItems": true
+        },
+        "allowed_kinds": {
+          "type": "array",
+          "items": { "type": "string" },
+          "uniqueItems": true
+        },
+        "allowed_access_policies": {
+          "type": "array",
+          "items": { "type": "string" },
+          "uniqueItems": true
+        },
+        "trusted_writers": {
+          "type": "array",
+          "items": { "type": "string" },
+          "uniqueItems": true
+        },
+        "include_redacted": { "type": "boolean" },
+        "include_content_refs": { "type": "boolean" },
+        "require_verified_source": { "type": "boolean" }
+      }
+    },
+    "memory_context_reject_reason": {
+      "type": "string",
+      "enum": [
+        "expired",
+        "redacted",
+        "confidence_too_low",
+        "scope_mismatch",
+        "sensitivity_not_allowed",
+        "source_taint_denied",
+        "source_data_class_denied",
+        "kind_not_allowed",
+        "access_policy_not_allowed",
+        "writer_not_trusted",
+        "source_record_missing"
+      ]
+    },
+    "memory_context_warning": {
+      "type": "string",
+      "enum": [
+        "memory_is_context_not_authority",
+        "writer_trust_not_constrained",
+        "content_ref_omitted"
+      ]
+    }
+  }
+}

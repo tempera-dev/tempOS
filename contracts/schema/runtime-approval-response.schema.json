@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "runtime-approval-response.schema.json",
+  "title": "RuntimeApprovalResponse",
+  "description": "HTTP/runtime response after daemon-recorded ApprovalRecorded evidence. If readmission is requested, the top-level final_journal_root_hash is the post-readmission decision append hash.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "session_id",
+    "action_id",
+    "review_id",
+    "approval_seq",
+    "approval_hash",
+    "final_journal_root_hash"
+  ],
+  "properties": {
+    "session_id": { "type": "string", "minLength": 1 },
+    "action_id": { "type": "string", "minLength": 1 },
+    "review_id": { "type": "string", "minLength": 1 },
+    "approval_seq": { "type": "integer", "minimum": 0 },
+    "approval_hash": { "$ref": "common.schema.json#/$defs/hash_value" },
+    "final_journal_root_hash": { "$ref": "common.schema.json#/$defs/hash_value" },
+    "readmission": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "decision",
+        "decision_id",
+        "explanation",
+        "matched_rules",
+        "decision_seq",
+        "decision_hash",
+        "final_journal_root_hash"
+      ],
+      "properties": {
+        "decision": { "$ref": "common.schema.json#/$defs/decision_result" },
+        "decision_id": { "type": "string", "minLength": 1 },
+        "explanation": { "type": "string" },
+        "matched_rules": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "required_review": { "type": "string", "minLength": 1 },
+        "required_simulation": { "type": "string", "minLength": 1 },
+        "decision_seq": { "type": "integer", "minimum": 0 },
+        "decision_hash": { "$ref": "common.schema.json#/$defs/hash_value" },
+        "final_journal_root_hash": { "$ref": "common.schema.json#/$defs/hash_value" }
+      }
+    }
+  }
+}

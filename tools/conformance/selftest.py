@@ -83,6 +83,23 @@ def run() -> list[str]:
     errs = validate(bad_manifest, "action-manifest.schema.json", reg)
     expect(bool(errs), "schema should reject an unknown property")
 
+    # 2b. Schema enforces string maxLength and object maxProperties ceilings
+    #     (used by the MCP local shell call env caps).
+    cap_reg = SchemaRegistry()
+    cap_reg.docs["caps.schema.json"] = {
+        "type": "object",
+        "maxProperties": 2,
+        "additionalProperties": {"type": "string", "maxLength": 3},
+    }
+    errs = validate({"a": "xxxx"}, "caps.schema.json", cap_reg)
+    expect(any("maxLength" in e for e in errs),
+           "schema should reject a string longer than maxLength")
+    errs = validate({"a": "x", "b": "y", "c": "z"}, "caps.schema.json", cap_reg)
+    expect(any("maxProperties" in e for e in errs),
+           "schema should reject an object with more than maxProperties properties")
+    errs = validate({"a": "xyz", "b": "y"}, "caps.schema.json", cap_reg)
+    expect(not errs, "schema should accept values at the maxLength/maxProperties ceilings")
+
     # 3. Policy decisions must bind to an action manifest digest.
     bad_decision = {
         "decision_id": "d",

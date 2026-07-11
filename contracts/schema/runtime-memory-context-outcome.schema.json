@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "runtime-memory-context-outcome.schema.json",
+  "title": "RuntimeMemoryContextOutcome",
+  "description": "HTTP/runtime response for daemon-backed memory context selection. The context is evidence, not authority, and is bound to a verified journal root.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "session_id",
+    "projected_memories",
+    "active_memories",
+    "selected_memories",
+    "rejected_memories",
+    "truncated_memories",
+    "truncated_rejections",
+    "journal_records",
+    "journal_root_hash",
+    "context",
+    "projection"
+  ],
+  "properties": {
+    "session_id": { "type": "string", "minLength": 1 },
+    "projected_memories": { "type": "integer", "minimum": 0 },
+    "active_memories": { "type": "integer", "minimum": 0 },
+    "selected_memories": { "type": "integer", "minimum": 0 },
+    "rejected_memories": { "type": "integer", "minimum": 0 },
+    "truncated_memories": { "type": "integer", "minimum": 0 },
+    "truncated_rejections": { "type": "integer", "minimum": 0 },
+    "journal_records": { "type": "integer", "minimum": 0 },
+    "journal_root_hash": { "$ref": "common.schema.json#/$defs/hash_value" },
+    "context": { "$ref": "memory-context-selection.schema.json" },
+    "projection": { "$ref": "#/$defs/runtime_bundle_projection_summary" }
+  },
+  "$defs": {
+    "runtime_bundle_projection_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "grants",
+        "active_grants",
+        "actions",
+        "decisions",
+        "model_route_decisions",
+        "pending_allowed_actions",
+        "pending_allowed_action_ids",
+        "runnable_pending_actions",
+        "runnable_pending_action_ids",
+        "execution_leases",
+        "open_execution_leases",
+        "open_execution_lease_ids",
+        "open_execution_lease_statuses",
+        "live_open_execution_leases",
+        "live_open_execution_lease_ids",
+        "expired_recoverable_execution_leases",
+        "expired_recoverable_execution_lease_ids",
+        "execution_reconciliations",
+        "recovery_blocked",
+        "admission_blocked",
+        "admission_blockers",
+        "receipts"
+      ],
+      "properties": {
+        "grants": { "type": "integer", "minimum": 0 },
+        "active_grants": { "type": "integer", "minimum": 0 },
+        "actions": { "type": "integer", "minimum": 0 },
+        "decisions": { "type": "integer", "minimum": 0 },
+        "model_route_decisions": { "type": "integer", "minimum": 0 },
+        "pending_allowed_actions": { "type": "integer", "minimum": 0 },
+        "pending_allowed_action_ids": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "runnable_pending_actions": { "type": "integer", "minimum": 0 },
+        "runnable_pending_action_ids": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "execution_leases": { "type": "integer", "minimum": 0 },
+        "open_execution_leases": { "type": "integer", "minimum": 0 },
+        "open_execution_lease_ids": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "open_execution_lease_statuses": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/scheduler_open_execution_lease" }
+        },
+        "live_open_execution_leases": { "type": "integer", "minimum": 0 },
+        "live_open_execution_lease_ids": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "expired_recoverable_execution_leases": { "type": "integer", "minimum": 0 },
+        "expired_recoverable_execution_lease_ids": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "execution_reconciliations": { "type": "integer", "minimum": 0 },
+        "recovery_blocked": { "type": "boolean" },
+        "admission_blocked": { "type": "boolean" },
+        "admission_blockers": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "receipts": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "scheduler_open_execution_lease": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action_id", "lease_id", "expires_at", "status"],
+      "properties": {
+        "action_id": { "type": "string" },
+        "lease_id": { "type": "string" },
+        "expires_at": { "$ref": "common.schema.json#/$defs/timestamp" },
+        "status": {
+          "type": "string",
+          "enum": ["live_open", "expired_recoverable"]
+        }
+      }
+    }
+  }
+}

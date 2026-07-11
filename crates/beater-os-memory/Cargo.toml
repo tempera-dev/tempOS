@@ -9,6 +9,10 @@ repository.workspace = true
 [dependencies]
 beater-os-core = { path = "../beater-os-core" }
 chrono.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
 
 [lints]
 workspace = true

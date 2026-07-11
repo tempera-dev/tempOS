@@ -25,7 +25,23 @@ they diverge.
 | `action-manifest.schema.json` | ActionManifest runtime mirror; core shape owned by `spec/contracts` | §7.4, §12.3 |
 | `policy-decision.schema.json` | PolicyDecision runtime mirror; core shape owned by `spec/contracts` | §7.5, §12.4 |
 | `capability-receipt.schema.json` | CapabilityReceipt runtime mirror; core shape owned by `spec/contracts` | §7.6, §12.5 |
-| `memory-record.schema.json` | MemoryRecord runtime mirror; core shape owned by `spec/contracts` | §7.7, §12.6 |
+| `memory-record.schema.json` | MemoryRecord runtime mirror and policy-safe context-selection notes; core shape owned by `spec/contracts` | §7.7, §12.6, §13.4 |
+| `memory-context-request.schema.json` | Runtime selector policy for bounded, source-anchored, non-authoritative memory context | §7.7, §12.6, §13.4 |
+| `memory-context-selection.schema.json` | Runtime memory context result with selected items, structured rejections, truncation, policy summary, and provenance | §7.7, §12.6, §13.4 |
+| `runtime-memory-record-request.schema.json` | HTTP/runtime request for recording one non-authoritative memory fact in a daemon session journal | §7.7, §12.6, §13.4 |
+| `runtime-memory-record-response.schema.json` | HTTP/runtime response after a daemon-journaled `MemoryWritten` record | §7.7, §12.6, §13.4 |
+| `runtime-memory-context-request.schema.json` | HTTP/runtime wrapper for selecting memory context under one daemon session | §7.7, §12.6, §13.4 |
+| `runtime-memory-context-outcome.schema.json` | HTTP/runtime memory context response bound to journal root and projection summary | §7.7, §12.6, §13.4 |
+| `runtime-approval-request.schema.json` | HTTP/runtime request for daemon-recorded action-bound approval evidence | §7.9, §12.4, §13.14 |
+| `runtime-approval-response.schema.json` | HTTP/runtime response after an `ApprovalRecorded` event and optional readmission decision append | §7.9, §12.4, §13.14 |
+| `runtime-execution-claim-request.schema.json` | HTTP/runtime compare-and-set request for claiming an admitted action lease | §4.4, §6.4, §7.6 |
+| `runtime-execution-claim-response.schema.json` | HTTP/runtime response after daemon-journaled `ExecutionLeaseIssued` | §4.4, §6.4, §7.6 |
+| `runtime-execution-heartbeat-request.schema.json` | HTTP/runtime request for bounded renewal of one live execution lease | §4.4, §6.4, §7.6 |
+| `runtime-execution-heartbeat-response.schema.json` | HTTP/runtime response after daemon-journaled `ExecutionLeaseHeartbeated` | §4.4, §6.4, §7.6 |
+| `runtime-execution-complete-request.schema.json` | HTTP/runtime receipt-input body for completing the exact open execution lease | §4.4, §6.4, §7.6 |
+| `runtime-execution-complete-response.schema.json` | HTTP/runtime response after lease-bound receipt append | §4.4, §6.4, §7.6 |
+| `runtime-execution-reconcile-request.schema.json` | HTTP/runtime request for closing an expired unresolved lease as `outcome_unknown` | §4.4, §6.4, §7.6 |
+| `runtime-execution-reconcile-response.schema.json` | HTTP/runtime response after daemon-journaled `ExecutionLeaseReconciled` | §4.4, §6.4, §7.6 |
 | `payment-mandate.schema.json` | PaymentMandate runtime mirror; core shape owned by `spec/contracts` | §12.7, §16.1 |
 | `scenario-manifest.schema.json` | ScenarioManifest runtime mirror; core shape owned by `spec/contracts` | §7.10, §12.8 |
 | `journal.schema.json` | JournalRecord + JournalEvent | §4.5, §10.4 |
@@ -35,6 +51,10 @@ they diverge.
 | `performance-trace.schema.json` | Optimization trace evidence envelope | §8, §13 |
 | `accelerator-telemetry.schema.json` | Vendor-neutral accelerator job telemetry | §8, §13 |
 | `worker-preflight-plan.schema.json` | Side-effect-free worker scheduler plan | §4.4, §6.4, §7 |
+| `model-route-decision.schema.json` | Journalable metadata-only model route decision before prompt egress | §6.10, §13.4, §24 |
+| `model-route-runtime.schema.json` | HTTP/runtime request and response wrapper for metadata-only model route selection | §6.10, §13.4, §24 |
+| `mcp-local-shell-call.schema.json` | Argument payload for the `tempos.local_shell` MCP stdio tool | §8.6, §13.6, §24 |
+| `mcp-local-shell-result.schema.json` | Structured result payload for the `tempos.local_shell` MCP stdio tool | §8.6, §13.6, §24 |
 
 ## Versioning & provenance
 
@@ -47,6 +67,12 @@ they diverge.
 - Enum orderings that carry meaning (`risk_class`, `data_class`) are listed in
   severity order; the conformance harness relies on that order for ceiling
   comparisons.
+- Memory context selectors must treat `MemoryRecord` as evidence-bound context
+  only: select active, non-expired records; verify `source_event_id` anchoring
+  in the journal projection, preserve `source_digest`; enforce `access_policy`,
+  explicit sensitivity allowlists and denied taint/data-class labels; bound both
+  selected items and returned rejections; and never use memory as authority for
+  grants, approvals, receipts, or trusted instructions.
 
 ## Validation
 

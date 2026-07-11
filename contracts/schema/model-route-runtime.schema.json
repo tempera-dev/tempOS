@@ -1,0 +1,289 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "model-route-runtime.schema.json",
+  "title": "RuntimeModelRouteOutcome",
+  "description": "HTTP/runtime wrapper for metadata-only model-route selection. The HTTP route request uses a daemon-configured catalog; the internal runtime request includes the trusted catalog explicitly.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["decision", "journal_seq", "journal_record_hash", "projection"],
+  "properties": {
+    "decision": { "$ref": "model-route-decision.schema.json" },
+    "journal_seq": { "$ref": "common.schema.json#/$defs/uint" },
+    "journal_record_hash": { "$ref": "common.schema.json#/$defs/hash_value" },
+    "projection": { "$ref": "#/$defs/projection_summary" }
+  },
+  "$defs": {
+    "http_request": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Body for POST /v1/sessions/<id>/model-routes/choose. Route metadata is loaded from the server's --model-route-catalog file, not from this body.",
+      "required": ["session_id", "request"],
+      "properties": {
+        "session_id": { "type": "string", "minLength": 1 },
+        "request": { "$ref": "#/$defs/model_route_request" }
+      }
+    },
+    "runtime_request": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Internal RuntimeModelRouteRequest used by trusted local runtime callers.",
+      "required": ["session_id", "routes", "request"],
+      "properties": {
+        "session_id": { "type": "string", "minLength": 1 },
+        "routes": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/model_route" }
+        },
+        "request": { "$ref": "#/$defs/model_route_request" }
+      }
+    },
+    "model_route": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "route_id",
+        "provider",
+        "model",
+        "model_version",
+        "locality",
+        "retention",
+        "pricing",
+        "p95_latency_ms",
+        "max_context_tokens",
+        "max_output_tokens"
+      ],
+      "properties": {
+        "route_id": { "type": "string", "minLength": 1 },
+        "provider": { "type": "string", "minLength": 1 },
+        "model": { "type": "string", "minLength": 1 },
+        "model_version": { "type": "string", "minLength": 1 },
+        "locality": {
+          "type": "string",
+          "enum": ["local", "private_cloud", "public_cloud"]
+        },
+        "retention": {
+          "type": "string",
+          "enum": ["none", "no_training", "limited", "provider_default"]
+        },
+        "max_data_class": {
+          "oneOf": [
+            { "$ref": "common.schema.json#/$defs/data_class" },
+            { "type": "null" }
+          ],
+          "default": null
+        },
+        "allowed_purposes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/model_purpose" },
+          "uniqueItems": true,
+          "default": []
+        },
+        "pricing": { "$ref": "#/$defs/route_pricing" },
+        "p95_latency_ms": { "$ref": "common.schema.json#/$defs/uint" },
+        "max_context_tokens": { "$ref": "common.schema.json#/$defs/uint" },
+        "max_output_tokens": { "$ref": "common.schema.json#/$defs/uint" },
+        "supports_tools": { "type": "boolean", "default": false },
+        "supports_multimodal": { "type": "boolean", "default": false },
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Trusted catalog routes are enabled by default; set false to keep a route in the catalog but unavailable for selection."
+        },
+        "notes": {
+          "oneOf": [{ "type": "string" }, { "type": "null" }],
+          "default": null
+        }
+      }
+    },
+    "route_pricing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "input_cents_per_million_tokens",
+        "output_cents_per_million_tokens"
+      ],
+      "properties": {
+        "input_cents_per_million_tokens": {
+          "$ref": "common.schema.json#/$defs/uint"
+        },
+        "output_cents_per_million_tokens": {
+          "$ref": "common.schema.json#/$defs/uint"
+        }
+      }
+    },
+    "model_route_request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "session_id",
+        "purpose",
+        "estimated_input_tokens",
+        "max_output_tokens",
+        "max_retention"
+      ],
+      "properties": {
+        "session_id": { "type": "string", "minLength": 1 },
+        "purpose": { "$ref": "#/$defs/model_purpose" },
+        "data_classes": {
+          "type": "array",
+          "items": { "$ref": "common.schema.json#/$defs/data_class" },
+          "uniqueItems": true
+        },
+        "taint": {
+          "type": "array",
+          "items": { "$ref": "common.schema.json#/$defs/taint_label" },
+          "uniqueItems": true
+        },
+        "estimated_input_tokens": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_output_tokens": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "latency_budget_ms": {
+          "oneOf": [{ "$ref": "common.schema.json#/$defs/uint" }, { "type": "null" }]
+        },
+        "max_estimated_cents": {
+          "oneOf": [{ "$ref": "common.schema.json#/$defs/uint" }, { "type": "null" }]
+        },
+        "required_local": { "type": "boolean" },
+        "required_tools": { "type": "boolean" },
+        "required_multimodal": { "type": "boolean" },
+        "max_retention": {
+          "type": "string",
+          "enum": ["none", "no_training", "limited", "provider_default"]
+        },
+        "allowed_routes": {
+          "type": "array",
+          "items": { "type": "string" },
+          "uniqueItems": true
+        },
+        "denied_routes": {
+          "type": "array",
+          "items": { "type": "string" },
+          "uniqueItems": true
+        },
+        "reason": {
+          "oneOf": [{ "type": "string" }, { "type": "null" }]
+        }
+      }
+    },
+    "model_purpose": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "planner",
+            "executor",
+            "verifier",
+            "classifier",
+            "summarizer",
+            "embedder",
+            "browser_use",
+            "code"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["other"],
+          "properties": {
+            "other": { "type": "string", "minLength": 1 }
+          }
+        }
+      ]
+    },
+    "projection_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "grants",
+        "active_grants",
+        "actions",
+        "decisions",
+        "model_route_decisions",
+        "pending_allowed_actions",
+        "pending_allowed_action_ids",
+        "runnable_pending_actions",
+        "runnable_pending_action_ids",
+        "execution_leases",
+        "open_execution_leases",
+        "open_execution_lease_ids",
+        "open_execution_lease_statuses",
+        "live_open_execution_leases",
+        "live_open_execution_lease_ids",
+        "expired_recoverable_execution_leases",
+        "expired_recoverable_execution_lease_ids",
+        "execution_reconciliations",
+        "recovery_blocked",
+        "admission_blocked",
+        "admission_blockers",
+        "receipts"
+      ],
+      "properties": {
+        "grants": { "$ref": "common.schema.json#/$defs/uint" },
+        "active_grants": { "$ref": "common.schema.json#/$defs/uint" },
+        "actions": { "$ref": "common.schema.json#/$defs/uint" },
+        "decisions": { "$ref": "common.schema.json#/$defs/uint" },
+        "model_route_decisions": { "$ref": "common.schema.json#/$defs/uint" },
+        "pending_allowed_actions": { "$ref": "common.schema.json#/$defs/uint" },
+        "pending_allowed_action_ids": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "runnable_pending_actions": { "$ref": "common.schema.json#/$defs/uint" },
+        "runnable_pending_action_ids": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "execution_leases": { "$ref": "common.schema.json#/$defs/uint" },
+        "open_execution_leases": { "$ref": "common.schema.json#/$defs/uint" },
+        "open_execution_lease_ids": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "open_execution_lease_statuses": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/open_execution_lease_status" }
+        },
+        "live_open_execution_leases": { "$ref": "common.schema.json#/$defs/uint" },
+        "live_open_execution_lease_ids": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "expired_recoverable_execution_leases": {
+          "$ref": "common.schema.json#/$defs/uint"
+        },
+        "expired_recoverable_execution_lease_ids": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "execution_reconciliations": { "$ref": "common.schema.json#/$defs/uint" },
+        "recovery_blocked": { "type": "boolean" },
+        "admission_blocked": { "type": "boolean" },
+        "admission_blockers": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "receipts": { "$ref": "common.schema.json#/$defs/uint" }
+      }
+    },
+    "open_execution_lease_status": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action_id", "lease_id", "expires_at", "status"],
+      "properties": {
+        "action_id": { "type": "string", "minLength": 1 },
+        "lease_id": { "type": "string", "minLength": 1 },
+        "expires_at": { "$ref": "common.schema.json#/$defs/timestamp" },
+        "status": {
+          "type": "string",
+          "enum": ["live_open", "expired_recoverable"]
+        }
+      }
+    }
+  }
+}

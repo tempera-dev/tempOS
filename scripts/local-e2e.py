@@ -150,6 +150,30 @@ def build_plan(
             (python, "scripts/run-beater-osd-http-claims-smoke.py", "--json"),
         )
     )
+    gates.append(
+        Gate(
+            "beater-os-mcp-stdio-gateway-smoke",
+            (python, "scripts/run-beater-os-mcp-stdio-gateway-smoke.py", "--json"),
+        )
+    )
+    gates.append(
+        Gate(
+            "beater-os-model-router-smoke",
+            (python, "scripts/run-beater-os-model-router-smoke.py", "--json"),
+        )
+    )
+    gates.append(
+        Gate(
+            "beater-osd-http-model-router-smoke",
+            (python, "scripts/run-beater-osd-http-model-router-smoke.py", "--json"),
+        )
+    )
+    gates.append(
+        Gate(
+            "beater-osd-http-memory-context-smoke",
+            (python, "scripts/run-beater-osd-http-memory-context-smoke.py", "--json"),
+        )
+    )
     bare_metal_readiness = [
         python,
         "scripts/check-bare-metal-readiness.py",

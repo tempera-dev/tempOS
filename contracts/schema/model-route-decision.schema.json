@@ -1,0 +1,154 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "model-route-decision.schema.json",
+  "title": "ModelRouteDecision",
+  "description": "Metadata-only model route decision emitted before prompt data crosses a provider boundary. This is journalable routing evidence, not model output authority.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "decision_id",
+    "session_id",
+    "result",
+    "selected",
+    "rejected_routes",
+    "policy_summary",
+    "requested_at"
+  ],
+  "properties": {
+    "decision_id": { "$ref": "common.schema.json#/$defs/hash_value" },
+    "session_id": { "type": "string", "minLength": 1 },
+    "result": { "$ref": "#/$defs/decision_result" },
+    "selected": {
+      "oneOf": [{ "$ref": "#/$defs/selection" }, { "type": "null" }]
+    },
+    "rejected_routes": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/rejection" }
+    },
+    "policy_summary": { "$ref": "#/$defs/policy_summary" },
+    "requested_at": { "$ref": "common.schema.json#/$defs/timestamp" }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "result": { "const": "allowed" } },
+        "required": ["result"]
+      },
+      "then": {
+        "properties": { "selected": { "$ref": "#/$defs/selection" } }
+      }
+    },
+    {
+      "if": {
+        "properties": { "result": { "const": "denied" } },
+        "required": ["result"]
+      },
+      "then": {
+        "properties": { "selected": { "type": "null" } }
+      }
+    }
+  ],
+  "$defs": {
+    "decision_result": {
+      "type": "string",
+      "enum": ["allowed", "denied"]
+    },
+    "route_locality": {
+      "type": "string",
+      "enum": ["local", "private_cloud", "public_cloud"]
+    },
+    "retention_class": {
+      "type": "string",
+      "enum": ["none", "no_training", "limited", "provider_default"]
+    },
+    "nullable_data_class": {
+      "oneOf": [
+        { "$ref": "common.schema.json#/$defs/data_class" },
+        { "type": "null" }
+      ]
+    },
+    "selection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "route_id",
+        "provider",
+        "model",
+        "model_version",
+        "locality",
+        "retention",
+        "max_data_class",
+        "estimated_cents",
+        "p95_latency_ms",
+        "max_context_tokens",
+        "max_output_tokens",
+        "selection_rank"
+      ],
+      "properties": {
+        "route_id": { "type": "string", "minLength": 1 },
+        "provider": { "type": "string" },
+        "model": { "type": "string" },
+        "model_version": { "type": "string" },
+        "locality": { "$ref": "#/$defs/route_locality" },
+        "retention": { "$ref": "#/$defs/retention_class" },
+        "max_data_class": { "$ref": "#/$defs/nullable_data_class" },
+        "estimated_cents": { "$ref": "common.schema.json#/$defs/uint" },
+        "p95_latency_ms": { "$ref": "common.schema.json#/$defs/uint" },
+        "max_context_tokens": { "$ref": "common.schema.json#/$defs/uint" },
+        "max_output_tokens": { "$ref": "common.schema.json#/$defs/uint" },
+        "selection_rank": { "$ref": "common.schema.json#/$defs/uint" }
+      }
+    },
+    "reject_reason": {
+      "type": "string",
+      "enum": [
+        "disabled",
+        "not_in_session_allowed_routes",
+        "not_in_request_allowed_routes",
+        "request_denied_route",
+        "local_only_required",
+        "purpose_not_allowed",
+        "data_class_too_high",
+        "retention_too_weak",
+        "context_too_small",
+        "output_too_small",
+        "latency_too_high",
+        "cost_too_high",
+        "cost_unknown",
+        "tools_unsupported",
+        "multimodal_unsupported"
+      ]
+    },
+    "rejection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["route_id", "reasons"],
+      "properties": {
+        "route_id": { "type": "string", "minLength": 1 },
+        "reasons": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/reject_reason" },
+          "uniqueItems": true
+        }
+      }
+    },
+    "policy_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allowed_routes", "local_only", "max_data_class"],
+      "properties": {
+        "allowed_routes": {
+          "type": "array",
+          "items": { "type": "string" },
+          "uniqueItems": true
+        },
+        "local_only": { "type": "boolean" },
+        "max_data_class": {
+          "$ref": "#/$defs/nullable_data_class",
+          "description": "Effective session policy ceiling after serde defaults. The default is internal; explicit null means no data-class ceiling."
+        }
+      }
+    }
+  }
+}

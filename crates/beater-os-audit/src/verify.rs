@@ -1095,6 +1095,7 @@ fn primary_event_id(record: &JournalRecord) -> Option<&str> {
         JournalEvent::ApprovalRecorded { approval } => Some(approval.review_id.as_str()),
         JournalEvent::SimulationRecorded { simulation } => Some(simulation.simulation_id.as_str()),
         JournalEvent::ReceiptAppended { receipt } => Some(receipt.receipt_id.as_str()),
+        JournalEvent::ModelRouteDecided { decision } => Some(decision.decision_id.as_str()),
         // Memory ids are mutable projection keys: the memory projection allows
         // later writes to replace the same memory_id, so they cannot be used as
         // globally unique journal event ids.

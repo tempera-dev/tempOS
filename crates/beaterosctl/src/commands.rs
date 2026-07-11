@@ -1,12 +1,18 @@
 use std::collections::BTreeSet;
+use std::fs;
 use std::path::{Component, Path};
 
 use beater_os_core::{
-    ActionKind, ActionManifest, AgentSession, Budget, CapabilityGrant, CapabilityReceiptInput,
-    CapabilityScope, CapabilitySelector, DataClass, DecisionResult, ExecutionLeaseReconciliation,
-    ExecutionLeaseResolution, GrantConstraints, HashValue, PaymentIntent, PaymentMandate,
+    ActionKind, ActionManifest, AgentSession, ApprovalEvidence, ApprovalMode, ApprovalRequirement,
+    Budget, CapabilityGrant, CapabilityReceiptInput, CapabilityScope, CapabilitySelector,
+    DataClass, DecisionResult, ExecutionLeaseReconciliation, ExecutionLeaseResolution,
+    GrantConstraints, HashValue, MemoryRecord, PaymentIntent, PaymentMandate,
     PaymentReceiptEvidence, PaymentSettlementStatus, ResourceKind, RiskClass, SessionStatus,
-    SideEffectClass, SimulationEvidence, hash_json,
+    SideEffectClass, SimulationEvidence, TaintLabel, hash_json,
+};
+use beater_os_memory::{MemoryContextRequest, MemoryContextSelection};
+use beater_os_model_router::{
+    ModelRoute, ModelRouteCatalog, ModelRouteDecision, ModelRouteRequest, choose_model_route_at,
 };
 use beater_os_sandbox::{SandboxLimits, safe_path_environment, validate_environment};
 use beater_os_tool_gateway::{
@@ -14,6 +20,7 @@ use beater_os_tool_gateway::{
 };
 use beater_osd::{DAEMON_POLICY_VERSION, LocalShellToolRegistration, SessionTransition, Store};
 use chrono::{DateTime, TimeDelta, Utc};
+use serde::Serialize;
 use uuid::Uuid;
 
 use crate::args::{self, ParsedArgs};
@@ -48,7 +55,11 @@ pub fn dispatch(store: &Store, args: &ParsedArgs) -> CliResult<String> {
         ("action", "propose") => action_propose(store, args),
         ("action", "execute") => action_execute(store, args),
         ("execution-lease", "reconcile") => execution_lease_reconcile(store, args),
+        ("approval", "record") => approval_record(store, args),
         ("simulation", "record") => simulation_record(store, args),
+        ("model-route", "choose") => model_route_choose(store, args),
+        ("memory", "record") => memory_record(store, args),
+        ("memory", "context") => memory_context(store, args),
         ("receipt", "record") => receipt_record(store, args),
         ("journal", "verify") => journal_verify(store, args),
         ("trace", "show") => trace_show(store, args),
@@ -427,6 +438,37 @@ fn grant_issue(store: &Store, args: &ParsedArgs) -> CliResult<String> {
         .get("grant-id")
         .map(str::to_string)
         .unwrap_or_else(|| default_root_grant_id(&session_id));
+    let approval_mode = match args.get("approval-mode") {
+        Some(value) => args::parse_enum::<ApprovalMode>("approval-mode", value)?,
+        None => ApprovalMode::None,
+    };
+    let reviewer_ids = args.csv("reviewer");
+    let approval = if approval_mode == ApprovalMode::None {
+        if !reviewer_ids.is_empty() {
+            return Err(CliError::Usage(
+                "--reviewer requires --approval-mode human or multi_party".to_string(),
+            ));
+        }
+        if args.get("approval-threshold-risk").is_some() {
+            return Err(CliError::Usage(
+                "--approval-threshold-risk requires --approval-mode human or multi_party"
+                    .to_string(),
+            ));
+        }
+        ApprovalRequirement::default()
+    } else {
+        if reviewer_ids.is_empty() {
+            return Err(CliError::MissingFlag("reviewer".to_string()));
+        }
+        ApprovalRequirement {
+            mode: approval_mode,
+            threshold_risk: match args.get("approval-threshold-risk") {
+                Some(value) => args::parse_enum::<RiskClass>("approval-threshold-risk", value)?,
+                None => RiskClass::High,
+            },
+            reviewer_ids,
+        }
+    };
     let grant = CapabilityGrant {
         grant_id,
         issuer: projection.session.created_by.clone(),
@@ -444,7 +486,7 @@ fn grant_issue(store: &Store, args: &ParsedArgs) -> CliResult<String> {
         constraints,
         expires_at,
         delegation: beater_os_core::DelegationMode::None,
-        approval: Default::default(),
+        approval,
         revocation_handle: args
             .get_or("revocation-handle", &Uuid::new_v4().to_string())
             .to_string(),
@@ -456,12 +498,15 @@ fn grant_issue(store: &Store, args: &ParsedArgs) -> CliResult<String> {
     store.issue_grant(&session_id, grant.clone(), now)?;
 
     Ok(format!(
-        "issued grant {}\n  holder:  {}\n  scope:   {:?} {} -> {:?}\n  revokes: {}\n  expires: {}",
+        "issued grant {}\n  holder:   {}\n  scope:    {:?} {} -> {:?}\n  approval: {:?} >= {:?} reviewers={}\n  revokes:  {}\n  expires:  {}",
         grant.grant_id,
         grant.holder,
         grant.scope.selector.resource_kind,
         grant.scope.selector.resource_id,
         grant.scope.actions,
+        grant.approval.mode,
+        grant.approval.threshold_risk,
+        grant.approval.reviewer_ids.join(","),
         grant.revocation_handle,
         grant.expires_at
     ))
@@ -869,6 +914,99 @@ fn parse_env_assignment(raw: &str) -> CliResult<(String, String)> {
     Ok((name.to_string(), value.to_string()))
 }
 
+fn approval_record(store: &Store, args: &ParsedArgs) -> CliResult<String> {
+    let now = Utc::now();
+    let session_id = require_session(store, args)?;
+    let projection = store.project(&session_id)?;
+    let action_id = require_non_empty(args, "action")?.to_string();
+    let manifest = projection
+        .manifest(&action_id)
+        .ok_or_else(|| CliError::Refused(format!("action {action_id} was never proposed")))?
+        .clone();
+    let latest_decision = projection.latest_decision(&action_id).ok_or_else(|| {
+        CliError::Refused(format!(
+            "action {action_id} has no policy decision requiring approval"
+        ))
+    })?;
+    if latest_decision.result != DecisionResult::NeedsApproval {
+        return Err(CliError::Refused(format!(
+            "action {action_id} latest decision is {:?}, not NeedsApproval",
+            latest_decision.result
+        )));
+    }
+
+    let grant_id = require_non_empty(args, "grant-id")?.to_string();
+    if !manifest.required_grants.contains(&grant_id) {
+        return Err(CliError::Refused(format!(
+            "approval grant {grant_id} is not one of action {action_id}'s required grants"
+        )));
+    }
+    if !projection
+        .grants
+        .iter()
+        .any(|grant| grant.grant_id == grant_id)
+    {
+        return Err(CliError::Refused(format!(
+            "approval grant {grant_id} has not been issued in session {session_id}"
+        )));
+    }
+
+    let approved_at = match args.get("approved-at") {
+        Some(value) => parse_rfc3339(value, "approved-at")?,
+        None => now,
+    };
+    if approved_at > now {
+        return Err(CliError::Refused(
+            "approval approved-at must not be in the future".to_string(),
+        ));
+    }
+    let reviewer_id = require_non_empty(args, "reviewer")?.to_string();
+    let approval = ApprovalEvidence {
+        review_id: args
+            .get("review-id")
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("review-{action_id}-{grant_id}")),
+        action_id: action_id.clone(),
+        manifest_hash: manifest.digest()?,
+        grant_id,
+        reviewer_id,
+        approved_at,
+        policy_version: POLICY_VERSION.to_string(),
+    };
+
+    let record = store.record_approval(&session_id, approval.clone(), now)?;
+    let mut out = vec![
+        format!(
+            "recorded approval {} for action {}",
+            approval.review_id, action_id
+        ),
+        format!("  grant:       {}", approval.grant_id),
+        format!("  reviewer:    {}", approval.reviewer_id),
+        format!("  approved_at: {}", approval.approved_at),
+        format!("  journal seq: {}", record.seq),
+    ];
+
+    if args.has_flag("readmit") {
+        let outcome = store.admit_action(&session_id, manifest)?;
+        out.push(format!("  readmit:     {:?}", outcome.decision.result));
+        out.push(format!("  explanation: {}", outcome.decision.explanation));
+        if !outcome.decision.matched_rules.is_empty() {
+            out.push(format!(
+                "  rules:       {}",
+                outcome.decision.matched_rules.join(", ")
+            ));
+        }
+        if let Some(review) = &outcome.decision.required_review {
+            out.push(format!("  needs review:     {review}"));
+        }
+        if let Some(sim) = &outcome.decision.required_simulation {
+            out.push(format!("  needs simulation: {sim}"));
+        }
+    }
+
+    Ok(out.join("\n"))
+}
+
 fn simulation_record(store: &Store, args: &ParsedArgs) -> CliResult<String> {
     let now = Utc::now();
     let session_id = require_session(store, args)?;
@@ -1099,6 +1237,198 @@ fn journal_verify(store: &Store, args: &ParsedArgs) -> CliResult<String> {
     ))
 }
 
+fn model_route_choose(store: &Store, args: &ParsedArgs) -> CliResult<String> {
+    let session_id = require_session(store, args)?;
+    let routes: Vec<ModelRoute> = read_json_file(args.require("routes-file")?, "routes-file")?;
+    let mut request: ModelRouteRequest =
+        read_json_file(args.require("request-file")?, "request-file")?;
+    if request.session_id != session_id {
+        return Err(CliError::Refused(format!(
+            "model route request session_id {} does not match --session {session_id}",
+            request.session_id
+        )));
+    }
+
+    let projection = store.project(&session_id)?;
+    if projection.session.status != SessionStatus::Running {
+        return Err(CliError::Refused(format!(
+            "model route request requires running session {session_id}; found {:?}",
+            projection.session.status
+        )));
+    }
+    if let Some(session_model_budget) = projection.session.budget.max_model_cents {
+        request.max_estimated_cents = Some(match request.max_estimated_cents {
+            Some(request_cap) => request_cap.min(session_model_budget),
+            None => session_model_budget,
+        });
+    }
+    let catalog = ModelRouteCatalog::new(routes)?;
+    let decision = choose_model_route_at(
+        &catalog,
+        &projection.session.model_policy,
+        &request,
+        Utc::now(),
+    )?;
+    let scheduler = projection.scheduler_projection(Utc::now());
+    let outcome = CliModelRouteOutcome {
+        decision,
+        projection: CliProjectionSummary {
+            grants: projection.grants.len(),
+            manifests: projection.manifests.len(),
+            decisions: projection.decisions.len(),
+            receipts: projection.receipts.len(),
+            pending_allowed_actions: scheduler.pending_allowed_action_ids.len(),
+            runnable_pending_actions: scheduler.runnable_pending_action_ids.len(),
+            open_execution_leases: scheduler.open_execution_lease_ids.len(),
+            recovery_blocked: scheduler.recovery_blocked,
+            admission_blocked: scheduler.admission_blocked,
+            admission_blockers: scheduler.admission_blockers,
+        },
+    };
+    Ok(serde_json::to_string_pretty(&outcome)?)
+}
+
+fn memory_record(store: &Store, args: &ParsedArgs) -> CliResult<String> {
+    let now = Utc::now();
+    let session_id = require_session(store, args)?;
+    let projection = store.project(&session_id)?;
+    let memory_id = require_non_empty(args, "memory-id")?.to_string();
+    let source_event_id = require_non_empty(args, "source-event")?.to_string();
+    let created_at = match args.get("created-at") {
+        Some(value) => parse_rfc3339(value, "created-at")?,
+        None => now,
+    };
+    if created_at > now {
+        return Err(CliError::Refused(
+            "memory created-at must not be in the future".to_string(),
+        ));
+    }
+    let expires_at = match args.get("expires-at") {
+        Some(value) => {
+            let expires_at = parse_rfc3339(value, "expires-at")?;
+            if expires_at <= now {
+                return Err(CliError::Refused(
+                    "memory expires-at must be in the future".to_string(),
+                ));
+            }
+            Some(expires_at)
+        }
+        None => None,
+    };
+    let confidence_basis_points = args::get_u64_or(args, "confidence-basis-points", 10_000)?;
+    if confidence_basis_points > 10_000 {
+        return Err(CliError::invalid(
+            "confidence-basis-points",
+            confidence_basis_points.to_string(),
+        ));
+    }
+    let scope = match args.get("scope") {
+        Some(scope) if scope.trim().is_empty() || scope == "true" => {
+            return Err(CliError::invalid("scope", scope));
+        }
+        Some(scope) => Some(scope.to_string()),
+        None => projection.session.memory_scope.clone(),
+    };
+    if let (Some(session_scope), Some(memory_scope)) =
+        (projection.session.memory_scope.as_deref(), scope.as_deref())
+        && session_scope != memory_scope
+    {
+        return Err(CliError::Refused(format!(
+            "memory scope {memory_scope} does not match session memory_scope {session_scope}"
+        )));
+    }
+    let memory = MemoryRecord {
+        memory_id: memory_id.clone(),
+        source_event_id,
+        source_digest: require_non_empty(args, "source-digest")?.to_string(),
+        writer: args
+            .get("writer")
+            .filter(|value| !value.trim().is_empty() && *value != "true")
+            .unwrap_or(projection.session.agent_id.as_str())
+            .to_string(),
+        created_at,
+        scope,
+        kind: require_non_empty(args, "kind")?.to_string(),
+        content_ref: require_non_empty(args, "content-ref")?.to_string(),
+        summary: require_non_empty(args, "summary")?.to_string(),
+        confidence_basis_points: confidence_basis_points as u16,
+        sensitivity: args::require_enum::<DataClass>(args, "sensitivity")?,
+        source_taint: parse_csv_enum_set::<TaintLabel>(args, "source-taint")?,
+        source_data_classes: parse_csv_enum_set::<DataClass>(args, "source-data-class")?,
+        expires_at,
+        access_policy: require_non_empty(args, "access-policy")?.to_string(),
+    };
+    let record = store.record_memory(&session_id, memory, now)?;
+    Ok(format!(
+        "recorded memory {memory_id}\n  source:      {}\n  scope:       {}\n  sensitivity: {:?}\n  journal seq: {}",
+        args.require("source-event")?,
+        projection
+            .session
+            .memory_scope
+            .as_deref()
+            .or(args.get("scope"))
+            .unwrap_or("<none>"),
+        args::require_enum::<DataClass>(args, "sensitivity")?,
+        record.seq
+    ))
+}
+
+fn memory_context(store: &Store, args: &ParsedArgs) -> CliResult<String> {
+    let session_id = require_session(store, args)?;
+    let max_items = match args.get("max-items") {
+        Some(value) => Some(parse_usize("max-items", value)?),
+        None => None,
+    };
+    let max_rejections = match args.get("max-rejections") {
+        Some(value) => Some(parse_usize("max-rejections", value)?),
+        None => None,
+    };
+    let min_confidence_basis_points = args::get_u64_or(args, "min-confidence-basis-points", 0)?;
+    if min_confidence_basis_points > 10_000 {
+        return Err(CliError::invalid(
+            "min-confidence-basis-points",
+            min_confidence_basis_points.to_string(),
+        ));
+    }
+    let scope = match args.get("scope") {
+        Some(scope) if scope.trim().is_empty() || scope == "true" => {
+            return Err(CliError::invalid("scope", scope));
+        }
+        Some(scope) => Some(scope.to_string()),
+        None => None,
+    };
+    let mut request = MemoryContextRequest {
+        scope,
+        max_items,
+        max_rejections,
+        min_confidence_basis_points: min_confidence_basis_points as u16,
+        ..MemoryContextRequest::default()
+    };
+    if args.has_flag("allow-sensitivity") {
+        request.allowed_sensitivities = parse_csv_enum_set::<DataClass>(args, "allow-sensitivity")?;
+    }
+    request.denied_source_taint = parse_csv_enum_set::<TaintLabel>(args, "deny-source-taint")?;
+    request.denied_source_data_classes =
+        parse_csv_enum_set::<DataClass>(args, "deny-source-data-class")?;
+    request.allowed_kinds = parse_csv_string_set(args, "allow-kind")?;
+    request.allowed_access_policies = parse_csv_string_set(args, "allow-access-policy")?;
+    request.trusted_writers = parse_csv_string_set(args, "trusted-writer")?;
+    request.include_redacted = args.has_flag("include-redacted");
+    request.include_content_refs = args.has_flag("include-content-refs");
+    request.require_verified_source = !args.has_flag("allow-unverified-source");
+
+    let selection = store.select_memory_context(&session_id, &request, Utc::now())?;
+    Ok(serde_json::to_string_pretty(&CliMemoryContextOutcome {
+        session_id,
+        projected_memories: selection.projected_memories,
+        active_memories: selection.active_memories,
+        journal_records: selection.journal_records,
+        journal_root_hash: selection.journal_root_hash,
+        context: selection.context,
+        projection: CliProjectionSummary::from_projection(&selection.projection),
+    })?)
+}
+
 fn trace_show(store: &Store, args: &ParsedArgs) -> CliResult<String> {
     let session_id = require_session(store, args)?;
     let projection = store.project(&session_id)?;
@@ -1253,6 +1583,55 @@ fn trace_export(store: &Store, args: &ParsedArgs) -> CliResult<String> {
     Ok(beater_os_audit::trace_bundle_to_json(&bundle)?)
 }
 
+#[derive(Serialize)]
+struct CliModelRouteOutcome {
+    decision: ModelRouteDecision,
+    projection: CliProjectionSummary,
+}
+
+#[derive(Serialize)]
+struct CliProjectionSummary {
+    grants: usize,
+    manifests: usize,
+    decisions: usize,
+    receipts: usize,
+    pending_allowed_actions: usize,
+    runnable_pending_actions: usize,
+    open_execution_leases: usize,
+    recovery_blocked: bool,
+    admission_blocked: bool,
+    admission_blockers: Vec<String>,
+}
+
+impl CliProjectionSummary {
+    fn from_projection(projection: &beater_osd::SessionProjection) -> Self {
+        let scheduler = projection.scheduler_projection(Utc::now());
+        Self {
+            grants: projection.grants.len(),
+            manifests: projection.manifests.len(),
+            decisions: projection.decisions.len(),
+            receipts: projection.receipts.len(),
+            pending_allowed_actions: scheduler.pending_allowed_action_ids.len(),
+            runnable_pending_actions: scheduler.runnable_pending_action_ids.len(),
+            open_execution_leases: scheduler.open_execution_lease_ids.len(),
+            recovery_blocked: scheduler.recovery_blocked,
+            admission_blocked: scheduler.admission_blocked,
+            admission_blockers: scheduler.admission_blockers,
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct CliMemoryContextOutcome {
+    session_id: String,
+    projected_memories: usize,
+    active_memories: usize,
+    journal_records: usize,
+    journal_root_hash: HashValue,
+    context: MemoryContextSelection,
+    projection: CliProjectionSummary,
+}
+
 /// Resolve the `--session` flag, verifying the session exists.
 fn require_session(store: &Store, args: &ParsedArgs) -> CliResult<String> {
     let session_id = args.require("session")?.to_string();
@@ -1260,6 +1639,14 @@ fn require_session(store: &Store, args: &ParsedArgs) -> CliResult<String> {
         return Err(CliError::SessionNotFound(session_id));
     }
     Ok(session_id)
+}
+
+fn read_json_file<T: serde::de::DeserializeOwned>(path: &str, field: &str) -> CliResult<T> {
+    if path.trim().is_empty() || path == "true" {
+        return Err(CliError::invalid(field, path));
+    }
+    let content = fs::read_to_string(path)?;
+    Ok(serde_json::from_str(&content)?)
 }
 
 fn default_root_grant_id(session_id: &str) -> String {
@@ -1391,6 +1778,47 @@ fn require_positive_u64(args: &ParsedArgs, field: &str) -> CliResult<u64> {
         return Err(CliError::invalid(field, raw));
     }
     Ok(value)
+}
+
+fn parse_usize(field: &str, raw: &str) -> CliResult<usize> {
+    if raw.trim().is_empty() || raw == "true" {
+        return Err(CliError::invalid(field, raw));
+    }
+    raw.parse::<usize>()
+        .map_err(|_| CliError::invalid(field, raw))
+}
+
+fn parse_csv_enum_set<T: serde::de::DeserializeOwned>(
+    args: &ParsedArgs,
+    field: &str,
+) -> CliResult<BTreeSet<T>>
+where
+    T: Ord,
+{
+    let mut out = BTreeSet::new();
+    let tokens = args.csv(field);
+    if args.has_flag(field) && tokens.is_empty() {
+        return Err(CliError::invalid(field, "true"));
+    }
+    for token in tokens {
+        out.insert(args::parse_enum::<T>(field, &token)?);
+    }
+    Ok(out)
+}
+
+fn parse_csv_string_set(args: &ParsedArgs, field: &str) -> CliResult<BTreeSet<String>> {
+    let mut out = BTreeSet::new();
+    let tokens = args.csv(field);
+    if args.has_flag(field) && tokens.is_empty() {
+        return Err(CliError::invalid(field, "true"));
+    }
+    for token in tokens {
+        if token.trim().is_empty() || token == "true" {
+            return Err(CliError::invalid(field, token));
+        }
+        out.insert(token);
+    }
+    Ok(out)
 }
 
 fn parse_rfc3339(value: &str, field: &str) -> CliResult<DateTime<Utc>> {

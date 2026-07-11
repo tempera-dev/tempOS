@@ -69,10 +69,17 @@
     "model_policy": {
       "type": "object",
       "additionalProperties": false,
+      "description": "Model routing constraints. allowed_routes defaults to empty, local_only defaults to false, and an omitted max_data_class fails closed at internal; explicit null means no data-class ceiling.",
       "properties": {
         "allowed_routes": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
         "local_only": { "type": "boolean" },
-        "max_data_class": { "$ref": "#/$defs/data_class" }
+        "max_data_class": {
+          "default": "internal",
+          "oneOf": [
+            { "$ref": "#/$defs/data_class" },
+            { "type": "null" }
+          ]
+        }
       }
     },
     "capability_selector": {
