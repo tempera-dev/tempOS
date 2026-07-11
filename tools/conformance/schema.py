@@ -3,7 +3,8 @@
 Supports exactly the subset used by `contracts/schema/*.json` (a pragmatic slice
 of JSON Schema draft 2020-12): type, properties, required, additionalProperties,
 enum, const, items, oneOf, allOf, $ref (intra- and cross-file), minimum,
-maximum, minItems, minLength, pattern, and format: date-time.
+maximum, minItems, minLength, maxLength, maxProperties, pattern, and
+format: date-time.
 
 Kept minimal on purpose: a full validator is a large dependency, and the schemas
 here are authored to stay within this subset. If a schema uses a keyword this
@@ -26,7 +27,8 @@ _SUPPORTED = {
     "$schema", "$id", "$defs", "$ref", "title", "description", "type",
     "properties", "required", "additionalProperties", "enum", "const",
     "items", "oneOf", "allOf", "minimum", "maximum", "minItems", "minLength",
-    "pattern", "format", "uniqueItems", "examples", "default",
+    "maxLength", "maxProperties", "pattern", "format", "uniqueItems",
+    "examples", "default",
 }
 
 
@@ -107,6 +109,8 @@ def _validate(inst, schema, cur_file, reg, path, errors) -> None:
     if isinstance(inst, str):
         if "minLength" in schema and len(inst) < schema["minLength"]:
             errors.append(f"{path}: string shorter than minLength {schema['minLength']}")
+        if "maxLength" in schema and len(inst) > schema["maxLength"]:
+            errors.append(f"{path}: string longer than maxLength {schema['maxLength']}")
         if "pattern" in schema and not re.search(schema["pattern"], inst):
             errors.append(f"{path}: {inst!r} does not match pattern {schema['pattern']!r}")
         if schema.get("format") == "date-time" and not _DATE_TIME.match(inst):
@@ -130,6 +134,10 @@ def _validate(inst, schema, cur_file, reg, path, errors) -> None:
                 _validate(item, schema["items"], cur_file, reg, f"{path}[{i}]", errors)
 
     if isinstance(inst, dict):
+        if "maxProperties" in schema and len(inst) > schema["maxProperties"]:
+            errors.append(
+                f"{path}: object has more properties than maxProperties {schema['maxProperties']}"
+            )
         props = schema.get("properties", {})
         for req in schema.get("required", []):
             if req not in inst:
