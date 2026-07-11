@@ -40,6 +40,10 @@ the same code path that *produced* it. It re-derives the audit invariants from
 - **Expected-root verification** — `verify --expected-root <hash>` compares the
   snapshot root against an external anchor, so a valid prefix or coherent
   re-hash can be detected relative to the trusted hand-off value.
+- **Full trace session-transition evidence** — `verify-trace` compares exported
+  `session_status_transitions` against `SessionStatusChanged` journal events in
+  append order. This is transition evidence, distinct from the folded exported
+  session status.
 - **Full trace lease evidence** — `verify-trace` compares exported
   `execution_leases`, `execution_lease_heartbeats`, and
   `execution_reconciliations` against their journal events in append order. This

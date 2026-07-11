@@ -174,6 +174,22 @@ def check_trace_bundle(rep: Report, reg, path: Path) -> None:
         f"trace {name} memory-records",
         "top-level memory_records must match memory_written journal events",
     )
+    projected_session_status_transitions = [
+        {
+            "transition_id": record.get("event", {}).get("transition_id"),
+            "session_id": record.get("event", {}).get("session_id"),
+            "from": record.get("event", {}).get("from"),
+            "to": record.get("event", {}).get("to"),
+        }
+        for record in bundle.get("journal", [])
+        if record.get("event", {}).get("kind") == "session_status_changed"
+    ]
+    rep.check(
+        bundle.get("session_status_transitions", [])
+        == projected_session_status_transitions,
+        f"trace {name} session-status-transitions",
+        "top-level session_status_transitions must match session_status_changed journal events",
+    )
     projected_capability_revocations = [
         {
             "grant_id": record.get("event", {}).get("grant_id"),

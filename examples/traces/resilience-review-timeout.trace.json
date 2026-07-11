@@ -22,6 +22,7 @@
       "status": "canceled"
     }
   ],
+  "session_status_transitions": [],
   "grants": [
     {
       "grant_id": "grant-deploy-prod",

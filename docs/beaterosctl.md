@@ -595,11 +595,11 @@ macOS local lane. Linux `seccomp`/Landlock/cgroups and container/VM lanes
 ## Live trace bundle export
 
 `trace export --session <id>` emits the full core-wire replay artifact for one
-session: session, grants, payment mandates, approvals, simulations, manifests,
-policy decisions, capability revocation records, execution lease lifecycle
-records, compact model route decisions, memory write records, scenario
-evaluations, incident annotations, receipts, and journal records. `--bundle-id
-<id>` overrides the default
+session: session, session status transitions, grants, payment mandates,
+approvals, simulations, manifests, policy decisions, capability revocation
+records, execution lease lifecycle records, compact model route decisions,
+memory write records, scenario evaluations, incident annotations, receipts, and
+journal records. `--bundle-id <id>` overrides the default
 `<session>:<journal-root-hash>`; `--description <text>` adds an optional human
 note.
 
@@ -626,14 +626,14 @@ $ beateros-audit verify-trace --expected-root <journal-root-hash> trace-bundle.j
 projection arrays from that journal, compares them to the exported arrays, and
 verifies the receipt chain from `ReceiptAppended` events. Model route decisions
 are checked as compact journal evidence (`ModelRouteDecided`), not as full route
-catalogs or prompt data. Capability revocations and memory records are checked
-as every `CapabilityRevoked` and `MemoryWritten` event in journal order, not as
-mutations to a live daemon projection. Execution leases, heartbeats, and
-reconciliations are checked as append-order event evidence, not as the current
-open-lease scheduler view. Scenario evaluations and incident annotations are
-checked as append-order journal evidence; incident ids and scenario ids remain
-the unique event ids in the journal. It is not an import, resume, restore, or
-live replay path.
+catalogs or prompt data. Session status transitions, capability revocations, and
+memory records are checked as every `SessionStatusChanged`, `CapabilityRevoked`,
+and `MemoryWritten` event in journal order, not as mutations to a live daemon
+projection. Execution leases, heartbeats, and reconciliations are checked as
+append-order event evidence, not as the current open-lease scheduler view.
+Scenario evaluations and incident annotations are checked as append-order
+journal evidence; incident ids and scenario ids remain the unique event ids in
+the journal. It is not an import, resume, restore, or live replay path.
 
 ## Invariants preserved
 

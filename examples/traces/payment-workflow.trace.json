@@ -25,6 +25,7 @@
       "status": "completed"
     }
   ],
+  "session_status_transitions": [],
   "payment_mandates": [
     {
       "mandate_id": "mandate-vendor",

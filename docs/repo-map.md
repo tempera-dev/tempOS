@@ -163,8 +163,9 @@ review boundaries.
     journal rather than trusting daemon or worker self-report.
   - `verify-trace` checks exported full trace bundles offline without importing
     them into daemon state, including execution-lease lifecycle evidence,
-    capability revocation evidence, compact model-route decision evidence,
-    memory write evidence, and scenario/incident annotations.
+    session-transition evidence, capability revocation evidence, compact
+    model-route decision evidence, memory write evidence, and scenario/incident
+    annotations.
 
 ## 3) Infrastructure and hardening gates
 
