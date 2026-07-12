@@ -1,6 +1,6 @@
-# beaterOS Review Gate
+# tempOS Review Gate
 
-This directory is the **review gate** for beaterOS PRs: a concrete, reusable
+This directory is the **review gate** for tempOS PRs: a concrete, reusable
 checklist a *non-author* reviewer runs against every PR, plus a linter that
 enforces the "no self-merge / independent review" rule at the agent-identity
 layer.
