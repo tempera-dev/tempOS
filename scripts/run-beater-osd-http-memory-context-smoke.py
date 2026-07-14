@@ -151,6 +151,7 @@ def memory_record(
     source_taint: list[str] | None = None,
     source_event_id: str = SESSION_ID,
     expires_at: str | None = None,
+    access_policy: str = "session",
 ) -> dict[str, Any]:
     return {
         "session_id": SESSION_ID,
@@ -169,7 +170,7 @@ def memory_record(
             "source_taint": source_taint or [],
             "source_data_classes": source_classes,
             "expires_at": expires_at,
-            "access_policy": "session",
+            "access_policy": access_policy,
         },
     }
 
@@ -181,6 +182,7 @@ def context_body(session_id: str = SESSION_ID, scope: str | None = None) -> dict
         "allowed_sensitivities": ["public", "internal"],
         "denied_source_taint": ["untrusted_web"],
         "denied_source_data_classes": ["secret"],
+        "allowed_access_policies": ["session"],
         "trusted_writers": ["writer:trusted"],
     }
     if scope is not None:
@@ -236,6 +238,12 @@ def run_smoke(root: Path, *, as_json: bool) -> int:
             sensitivity="internal",
             source_classes=["internal"],
             source_taint=["untrusted_web"],
+        ),
+        memory_record(
+            "policy-disallowed-context",
+            sensitivity="internal",
+            source_classes=["internal"],
+            access_policy="operator-only",
         ),
     ]:
         record_status, record_payload = one_shot_request(
@@ -296,15 +304,16 @@ def run_smoke(root: Path, *, as_json: bool) -> int:
         "secret-context": {"sensitivity_not_allowed", "source_data_class_denied"},
         "expired-context": {"expired"},
         "poisoned-context": {"source_taint_denied"},
+        "policy-disallowed-context": {"access_policy_not_allowed"},
     }
     for memory_id, reasons in expected_rejections.items():
         if not reasons.issubset(rejection_reasons.get(memory_id, set())):
             raise RuntimeError(
                 f"expected {memory_id} rejection reasons {sorted(reasons)}: {selected_payload}"
             )
-    if selected_payload.get("selected_memories") != 1 or selected_payload.get("rejected_memories") != 3:
+    if selected_payload.get("selected_memories") != 1 or selected_payload.get("rejected_memories") != 4:
         raise RuntimeError(f"unexpected memory context counts: {selected_payload}")
-    if not selected_payload.get("journal_root_hash") or selected_payload.get("journal_records", 0) < 5:
+    if not selected_payload.get("journal_root_hash") or selected_payload.get("journal_records", 0) < 6:
         raise RuntimeError(f"expected journal root evidence: {selected_payload}")
     if context.get("selection_policy", {}).get("scope") != MEMORY_SCOPE:
         raise RuntimeError(f"expected session memory_scope default in selection policy: {selected_payload}")
