@@ -5,7 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Typed agent runtime loop over the beaterOS daemon store."
+description = "Typed agent runtime loop over the tempOS daemon store."
 
 [dependencies]
 beater-os-core = { path = "../beater-os-core" }

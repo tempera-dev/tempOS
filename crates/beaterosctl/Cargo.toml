@@ -5,7 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Operator CLI and durable local journal store for the beaterOS agent kernel."
+description = "Operator CLI and durable local journal store for the tempOS agent kernel."
 
 [[bin]]
 name = "beaterosctl"

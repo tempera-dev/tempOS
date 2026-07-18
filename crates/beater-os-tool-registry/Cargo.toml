@@ -5,7 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Trustworthy tool registry for the beaterOS agent kernel: signed manifests, version/schema pinning, risk metadata, per-workspace allowlists, quarantine, and revocation."
+description = "Trustworthy tool registry for the tempOS agent kernel: signed manifests, version/schema pinning, risk metadata, per-workspace allowlists, quarantine, and revocation."
 
 [dependencies]
 beater-os-core = { path = "../beater-os-core" }
