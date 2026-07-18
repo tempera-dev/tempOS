@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "common.schema.json",
-  "title": "beaterOS shared contract vocabulary",
+  "title": "tempOS shared contract vocabulary",
   "description": "Enums and shared structures for the core contracts. Schema names and snake_case enum values mirror the Rust wire format in crates/beater-os-core.",
   "$defs": {
     "timestamp": {

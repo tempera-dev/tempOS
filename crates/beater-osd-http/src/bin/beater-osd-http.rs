@@ -1,6 +1,6 @@
 //! Minimal beater-osd runtime entrypoint for hosted agent-kernel bootstrap.
 //!
-//! This is the first runnable daemon surface for `beaterOS`. It intentionally
+//! This is the first runnable daemon surface for `tempOS`. It intentionally
 //! implements only a strict, auditable bootstrap loop:
 //!
 //! 1. open/create the daemon store
@@ -81,7 +81,7 @@ struct RuntimeSmokeReport {
 }
 
 const USAGE: &str = "\
-beater-osd-http — loopback HTTP control plane for the beaterOS daemon
+beater-osd-http — loopback HTTP control plane for the tempOS daemon
 
 USAGE:
     beater-osd-http [runtime-smoke] [--root <path>] [--session-id <id>] [--json]

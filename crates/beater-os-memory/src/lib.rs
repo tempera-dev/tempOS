@@ -1,4 +1,4 @@
-//! Accountable memory projection for beaterOS.
+//! Accountable memory projection for tempOS.
 //!
 //! This crate realizes `final.md` §25 build-order step 10 ("Memory projection
 //! from journal") and the §10.8 Memory Service responsibilities of *building

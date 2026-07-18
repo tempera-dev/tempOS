@@ -1,4 +1,4 @@
-# beaterOS Runtime And Evidence Schemas
+# tempOS Runtime And Evidence Schemas
 
 JSON Schemas (draft 2020-12) for runtime, evidence, optimization, and eval
 artifacts that sit around the tempOS core contracts.
