@@ -1,6 +1,6 @@
 # beater-os-audit
 
-Independent audit surface for beaterOS. Reviewer-facing companion to
+Independent audit surface for tempOS. Reviewer-facing companion to
 `beater-os-core`.
 
 This crate exists so that the party who *reviews* a run is not forced to trust

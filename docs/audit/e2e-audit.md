@@ -1,4 +1,4 @@
-# beaterOS — End-to-End Repo Audit
+# tempOS — End-to-End Repo Audit
 
 **This is a point-in-time audit taken on 2026-07-03, when the repo was
 planning-only. It is a historical record, not a description of current `main`.
