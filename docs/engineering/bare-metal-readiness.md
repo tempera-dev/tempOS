@@ -1,4 +1,4 @@
-# beaterOS Bare-Metal Readiness Program
+# tempOS Bare-Metal Readiness Program
 
 This document defines the next implementation lane for moving into metal-facing work:
 start from contracts, measure where host abstractions saturate, and only then add

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "Default deterministic host matrix for beaterOS bare-metal readiness checks.",
+  "description": "Default deterministic host matrix for tempOS bare-metal readiness checks.",
   "cases": [
     {
       "name": "portable-control-plane-linux",
