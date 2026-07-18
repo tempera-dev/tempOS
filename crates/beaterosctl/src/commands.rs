@@ -1577,6 +1577,7 @@ fn trace_export(store: &Store, args: &ParsedArgs) -> CliResult<String> {
         simulations: export.projection.simulations,
         manifests: export.projection.manifests,
         decisions: export.projection.decisions,
+        model_route_decisions: export.projection.model_route_decisions,
         receipts: export.projection.receipts,
         journal: export.journal.records,
     };
