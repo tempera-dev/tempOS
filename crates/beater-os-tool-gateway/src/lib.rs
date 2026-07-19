@@ -708,19 +708,21 @@ fn clamp_limits_to_lease_budget(
     lease: &ExecutionLease,
     now: chrono::DateTime<Utc>,
 ) -> GatewayResult<SandboxLimits> {
-    let Some(max_wall_ms) = lease.requested_budget.max_wall_ms else {
-        return Ok(limits);
+    let deadline = if let Some(max_wall_ms) = lease.requested_budget.max_wall_ms {
+        let budget_ms =
+            i64::try_from(max_wall_ms).map_err(|_| GatewayError::ExecutionLeaseBudgetOverflow {
+                lease_id: lease.lease_id.clone(),
+            })?;
+        let budget_deadline = lease
+            .leased_at
+            .checked_add_signed(TimeDelta::milliseconds(budget_ms))
+            .ok_or_else(|| GatewayError::ExecutionLeaseBudgetOverflow {
+                lease_id: lease.lease_id.clone(),
+            })?;
+        lease.expires_at.min(budget_deadline)
+    } else {
+        lease.expires_at
     };
-    let budget_ms =
-        i64::try_from(max_wall_ms).map_err(|_| GatewayError::ExecutionLeaseBudgetOverflow {
-            lease_id: lease.lease_id.clone(),
-        })?;
-    let deadline = lease
-        .leased_at
-        .checked_add_signed(TimeDelta::milliseconds(budget_ms))
-        .ok_or_else(|| GatewayError::ExecutionLeaseBudgetOverflow {
-            lease_id: lease.lease_id.clone(),
-        })?;
     let remaining = deadline.signed_duration_since(now);
     let remaining_ms = remaining.num_milliseconds();
     if remaining_ms <= 0 {
@@ -856,7 +858,13 @@ fn side_effect_summary(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::TimeZone;
+
+    fn at(seconds: i64) -> chrono::DateTime<Utc> {
+        let Some(timestamp) = chrono::DateTime::from_timestamp(seconds, 0) else {
+            panic!("fixed test timestamp must be representable");
+        };
+        timestamp
+    }
 
     fn lease_with_wall_budget(max_wall_ms: Option<u64>) -> ExecutionLease {
         ExecutionLease {
@@ -878,20 +886,22 @@ mod tests {
                 max_wall_ms,
                 max_payment_minor_units: None,
             },
-            leased_at: Utc.timestamp_opt(1_000, 0).unwrap(),
-            expires_at: Utc.timestamp_opt(1_030, 0).unwrap(),
+            leased_at: at(1_000),
+            expires_at: at(1_030),
         }
     }
 
     #[test]
     fn lease_wall_budget_clamps_claimed_timeout() {
         let lease = lease_with_wall_budget(Some(5_000));
-        let mut limits = SandboxLimits::default();
-        limits.timeout = Duration::from_secs(30);
+        let limits = SandboxLimits {
+            timeout: Duration::from_secs(30),
+            ..SandboxLimits::default()
+        };
 
-        let clamped =
-            clamp_limits_to_lease_budget(limits, &lease, Utc.timestamp_opt(1_003, 0).unwrap())
-                .unwrap();
+        let Ok(clamped) = clamp_limits_to_lease_budget(limits, &lease, at(1_003)) else {
+            panic!("valid lease budget should clamp the timeout");
+        };
 
         assert_eq!(clamped.timeout, Duration::from_secs(2));
     }
@@ -899,12 +909,14 @@ mod tests {
     #[test]
     fn lease_wall_budget_preserves_tighter_claimed_timeout() {
         let lease = lease_with_wall_budget(Some(5_000));
-        let mut limits = SandboxLimits::default();
-        limits.timeout = Duration::from_secs(1);
+        let limits = SandboxLimits {
+            timeout: Duration::from_secs(1),
+            ..SandboxLimits::default()
+        };
 
-        let clamped =
-            clamp_limits_to_lease_budget(limits, &lease, Utc.timestamp_opt(1_003, 0).unwrap())
-                .unwrap();
+        let Ok(clamped) = clamp_limits_to_lease_budget(limits, &lease, at(1_003)) else {
+            panic!("valid lease budget should preserve a tighter timeout");
+        };
 
         assert_eq!(clamped.timeout, Duration::from_secs(1));
     }
@@ -913,16 +925,46 @@ mod tests {
     fn expired_lease_wall_budget_refuses_claimed_execution() {
         let lease = lease_with_wall_budget(Some(5_000));
 
-        let err = clamp_limits_to_lease_budget(
-            SandboxLimits::default(),
-            &lease,
-            Utc.timestamp_opt(1_006, 0).unwrap(),
-        )
-        .unwrap_err();
+        let Err(err) = clamp_limits_to_lease_budget(SandboxLimits::default(), &lease, at(1_006))
+        else {
+            panic!("expired lease budget should refuse execution");
+        };
 
         assert!(matches!(
             err,
             GatewayError::ExecutionLeaseBudgetExpired { lease_id } if lease_id == "lease-test"
         ));
+    }
+
+    #[test]
+    fn lease_expiration_clamps_claimed_timeout_without_wall_budget() {
+        let mut lease = lease_with_wall_budget(None);
+        lease.expires_at = at(1_004);
+        let limits = SandboxLimits {
+            timeout: Duration::from_secs(30),
+            ..SandboxLimits::default()
+        };
+
+        let Ok(clamped) = clamp_limits_to_lease_budget(limits, &lease, at(1_003)) else {
+            panic!("open lease expiration should clamp the timeout");
+        };
+
+        assert_eq!(clamped.timeout, Duration::from_secs(1));
+    }
+
+    #[test]
+    fn earlier_lease_expiration_wins_over_requested_wall_budget() {
+        let mut lease = lease_with_wall_budget(Some(30_000));
+        lease.expires_at = at(1_004);
+        let limits = SandboxLimits {
+            timeout: Duration::from_secs(30),
+            ..SandboxLimits::default()
+        };
+
+        let Ok(clamped) = clamp_limits_to_lease_budget(limits, &lease, at(1_003)) else {
+            panic!("earlier lease expiration should clamp the timeout");
+        };
+
+        assert_eq!(clamped.timeout, Duration::from_secs(1));
     }
 }
