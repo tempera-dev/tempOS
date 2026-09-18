@@ -6,6 +6,7 @@ name: contracts-conformance
 
 on:
   push:
+    branches: [main]
     paths:
       - "contracts/**"
       - "examples/**"
@@ -20,6 +21,10 @@ on:
       - "tools/conformance/**"
       - ".github/workflows/contracts.yml"
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   conformance:
