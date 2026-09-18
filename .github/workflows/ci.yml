@@ -9,6 +9,14 @@ on:
     branches:
       - main
 
+concurrency:
+  # pull_request and pull_request_target both fire for the same PR, so the event
+  # name is part of the key: otherwise the two runs would cancel each other.
+  # github.ref is the base branch under pull_request_target, so the PR number is
+  # what actually separates one PR from another here.
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event.pull_request.number != null }}
+
 jobs:
   pr-review-packet:
     name: PR review packet
